@@ -64,8 +64,11 @@ namespace System.Web.Compilation
 				atts_hash.Add (keys [i], values [i]);
 			}
 			got_hashed = true;
-			keys = null;
-			values = null;
+			// edit (determinism): upstream nulls keys/values here and lets
+			// Keys/Values fall back to Hashtable enumeration, which orders a
+			// server tag's attributes by hash — non-deterministic across compiler
+			// processes. We keep the lists so Keys/Values stay in markup order;
+			// atts_hash remains the lookup and duplicate-detection store.
 		}
 		
 		public bool IsRunAtServer ()
@@ -95,20 +98,26 @@ namespace System.Web.Compilation
 					throw new HttpException ("Tag contains duplicated '" + key +
 								 "' attributes.");
 				atts_hash.Add (key, value);
+				// edit (determinism): mirror the post-hash add into the ordered
+				// lists so Keys/Values keep markup order (see MakeHash).
+				keys.Add (key);
+				values.Add (value);
 			} else {
 				keys.Add (key);
 				values.Add (value);
 			}
 		}
 		
-		public ICollection Keys 
+		// edit (determinism): always return the markup-ordered lists rather
+		// than Hashtable enumeration once a tag is hashed (see MakeHash).
+		public ICollection Keys
 		{
-			get { return (got_hashed ? atts_hash.Keys : keys); }
+			get { return keys; }
 		}
 
-		public ICollection Values 
+		public ICollection Values
 		{
-			get { return (got_hashed ? atts_hash.Values : values); }
+			get { return values; }
 		}
 
 		int CaseInsensitiveSearch (string key)
