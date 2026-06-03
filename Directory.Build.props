@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <Authors>ssimek</Authors>
+    <Company>triaxis s.r.o.</Company>
+    <Description>Roslyn source generator that compiles ASP.NET WebForms (.aspx/.ascx/.master) markup into the assembly at build time, replacing the Windows-only aspnet_compiler precompile step.</Description>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <PackageVersion>0.0.1-dev</PackageVersion>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/triaxis-oss/triaxis.WebForms.SourceGenerator</PackageProjectUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
+  </ItemGroup>
+</Project>
