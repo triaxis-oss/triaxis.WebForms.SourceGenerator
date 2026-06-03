@@ -7,9 +7,8 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <!-- Analyzer-only package: ships the analyzer dll under analyzers/ plus
-         (in a follow-up) a buildTransitive targets file. No runtime lib/
-         content, no flowed dependencies. The TFM-specific hook below adds
-         the dll into the package via the canonical Roslyn-SDK pattern. -->
+         a buildTransitive targets file plus the MSBuild task dll under
+         tasks/. No runtime lib/ content, no flowed dependencies. -->
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <DevelopmentDependency>true</DevelopmentDependency>
@@ -22,6 +21,11 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+    <!-- ProjectReference (not PackageReference) so the tasks dll is built
+         before our pack target runs; ReferenceOutputAssembly=false because
+         the analyzer has no compile-time dependency on the tasks classes. -->
+    <ProjectReference Include="..\triaxis.WebForms.MSBuildTasks\triaxis.WebForms.MSBuildTasks.csproj"
+                      PrivateAssets="all" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,15 +33,32 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="buildTransitive\$(PackageId).targets"
+          Pack="true" PackagePath="buildTransitive" Visible="false" />
     <None Include="..\..\LICENSE.txt" Pack="true" PackagePath="$(PackageLicenseFile)" Visible="false" />
     <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 
   <Target Name="_AddAnalyzerToPackage">
+    <PropertyGroup>
+      <_TriaxisTasksBuildOutput>$(MSBuildThisFileDirectory)..\triaxis.WebForms.MSBuildTasks\bin\$(Configuration)\netstandard2.0\</_TriaxisTasksBuildOutput>
+    </PropertyGroup>
     <ItemGroup>
       <TfmSpecificPackageFile Include="$(OutputPath)$(AssemblyName).dll" PackagePath="analyzers/dotnet/cs" />
       <TfmSpecificPackageFile Include="$(OutputPath)$(AssemblyName).pdb" PackagePath="analyzers/dotnet/cs"
                               Condition=" Exists('$(OutputPath)$(AssemblyName).pdb') " />
+      <!-- buildTransitive/<id>.targets references this dll by relative path
+           ($(MSBuildThisFileDirectory)../tasks/netstandard2.0/...). -->
+      <TfmSpecificPackageFile Include="$(_TriaxisTasksBuildOutput)triaxis.WebForms.MSBuildTasks.dll"
+                              PackagePath="tasks/netstandard2.0" />
+      <TfmSpecificPackageFile Include="$(_TriaxisTasksBuildOutput)triaxis.WebForms.MSBuildTasks.pdb"
+                              PackagePath="tasks/netstandard2.0"
+                              Condition=" Exists('$(_TriaxisTasksBuildOutput)triaxis.WebForms.MSBuildTasks.pdb') " />
     </ItemGroup>
   </Target>
 

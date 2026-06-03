@@ -1,0 +1,82 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Auto-collect the markup corpus into AdditionalFiles. Set to false
+         if the consumer project supplies its own AdditionalFiles list. -->
+    <TriaxisWebFormsCollectMarkup Condition=" '$(TriaxisWebFormsCollectMarkup)' == '' ">true</TriaxisWebFormsCollectMarkup>
+    <!-- The markup file set the generator consumes and the .compiled
+         sidecar emitter writes for. Hoisted so both consumers stay in
+         lockstep; override to extend coverage. -->
+    <TriaxisWebFormsMarkupInclude Condition=" '$(TriaxisWebFormsMarkupInclude)' == '' ">**\*.aspx;**\*.ascx;**\*.master;Global.asax</TriaxisWebFormsMarkupInclude>
+    <TriaxisWebFormsMarkupExclude Condition=" '$(TriaxisWebFormsMarkupExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</TriaxisWebFormsMarkupExclude>
+    <!-- At publish, replace each markup file with a zero-byte placeholder:
+         BuildManager only probes for existence once .compiled sidecars put
+         the app in non-updatable precompiled mode, so the deployment
+         doesn't need the source. Opt out with
+         TriaxisWebFormsStripPublishedMarkup=false. -->
+    <TriaxisWebFormsStripPublishedMarkup Condition=" '$(TriaxisWebFormsStripPublishedMarkup)' == '' ">true</TriaxisWebFormsStripPublishedMarkup>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <CompilerVisibleProperty Include="MSBuildProjectDirectory" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TriaxisWebFormsCollectMarkup)' == 'true' ">
+    <AdditionalFiles Include="$(TriaxisWebFormsMarkupInclude)" Exclude="$(TriaxisWebFormsMarkupExclude)" />
+    <!-- web.config <pages><controls> supplies site-wide tag-prefix → namespace
+         mappings the generator needs to resolve control types. -->
+    <AdditionalFiles Include="web.config" Condition=" Exists('web.config') " />
+  </ItemGroup>
+
+  <!-- BuildManager only enters precompiled mode when PrecompiledApp.config
+       sits at the web root (next to web.config). Without it, the .compiled
+       sidecars below are ignored and aspx pages get JIT-compiled at request
+       time — which on Linux silently fails. Fail the build early with a
+       copy-pasteable fix; the marker is a one-line config that belongs in
+       source control alongside web.config. -->
+  <Target Name="TriaxisCheckPrecompiledAppConfig" BeforeTargets="Build"
+          Condition=" '$(TriaxisWebFormsCheckPrecompiledAppConfig)' != 'false' AND !Exists('$(MSBuildProjectDirectory)\PrecompiledApp.config') ">
+    <Error Code="TWF001"
+           Text="PrecompiledApp.config is missing from the project root. The WebForms source generator requires it next to web.config so BuildManager enters precompiled mode. Create PrecompiledApp.config with this single line and commit it: &lt;precompiledApp version=&quot;2&quot; updatable=&quot;false&quot; /&gt;  Override with -p:TriaxisWebFormsCheckPrecompiledAppConfig=false." />
+  </Target>
+
+  <!-- The two MSBuild tasks live in tasks/netstandard2.0/, compiled from
+       src/triaxis.WebForms.MSBuildTasks/ and packed alongside the analyzer.
+       Loading the dll once instead of building a Roslyn-RoslynCodeTaskFactory
+       task inline per build avoids ~120 lines of unreviewable C# in XML. -->
+  <UsingTask TaskName="triaxis.WebForms.MSBuildTasks.TriaxisGenerateWebFormsCompiledFiles"
+             AssemblyFile="$(MSBuildThisFileDirectory)..\tasks\netstandard2.0\triaxis.WebForms.MSBuildTasks.dll" />
+  <UsingTask TaskName="triaxis.WebForms.MSBuildTasks.TriaxisStripMarkupFiles"
+             AssemblyFile="$(MSBuildThisFileDirectory)..\tasks\netstandard2.0\triaxis.WebForms.MSBuildTasks.dll" />
+
+  <!-- Emit lean .compiled stubs pointing BuildManager at the Roslyn-generated
+       ASP.* types in the main app assembly, replacing the
+       aspnet_compiler / aspnet_merge precompile. -->
+  <Target Name="TriaxisGenerateWebFormsCompiled" AfterTargets="Build">
+    <!-- Same include/exclude as the generator's AdditionalFiles up top; the
+         property hoist keeps these two consumers from drifting. -->
+    <ItemGroup>
+      <_TriaxisMarkupForCompiled Include="$(TriaxisWebFormsMarkupInclude)"
+                                 Exclude="$(TriaxisWebFormsMarkupExclude)" />
+    </ItemGroup>
+    <triaxis.WebForms.MSBuildTasks.TriaxisGenerateWebFormsCompiledFiles
+        ProjectDir="$(MSBuildProjectDirectory)"
+        OutputDir="$(OutDir)"
+        AssemblyName="$(AssemblyName)"
+        MarkupFiles="@(_TriaxisMarkupForCompiled)" />
+  </Target>
+
+  <!-- After Publish, zero out each published markup file. The page type is
+       already compiled into the assembly; BuildManager just needs the file
+       to exist. Empty placeholders keep the deployment small and the
+       source out of the artifact. -->
+  <Target Name="TriaxisStripPublishedMarkup" AfterTargets="Publish"
+          Condition=" '$(TriaxisWebFormsStripPublishedMarkup)' == 'true' ">
+    <ItemGroup>
+      <_TriaxisPublishedMarkup Include="$(PublishDir)**\*.aspx;$(PublishDir)**\*.ascx;$(PublishDir)**\*.master" />
+    </ItemGroup>
+    <triaxis.WebForms.MSBuildTasks.TriaxisStripMarkupFiles
+        Files="@(_TriaxisPublishedMarkup)" />
+  </Target>
+
+</Project>

@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "triaxis.WebForms.SourceGene
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "triaxis.WebForms.SourceGenerator.Tests", "triaxis.WebForms.SourceGenerator.Tests\triaxis.WebForms.SourceGenerator.Tests.csproj", "{63C78978-5C4E-4DD2-B421-A9BF351B23BE}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "triaxis.WebForms.MSBuildTasks", "triaxis.WebForms.MSBuildTasks\triaxis.WebForms.MSBuildTasks.csproj", "{621E8648-B532-463E-9D59-3130D73009E8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,18 @@ Global
 		{63C78978-5C4E-4DD2-B421-A9BF351B23BE}.Release|x64.Build.0 = Release|Any CPU
 		{63C78978-5C4E-4DD2-B421-A9BF351B23BE}.Release|x86.ActiveCfg = Release|Any CPU
 		{63C78978-5C4E-4DD2-B421-A9BF351B23BE}.Release|x86.Build.0 = Release|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Debug|x64.Build.0 = Debug|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Debug|x86.Build.0 = Debug|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Release|x64.ActiveCfg = Release|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Release|x64.Build.0 = Release|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Release|x86.ActiveCfg = Release|Any CPU
+		{621E8648-B532-463E-9D59-3130D73009E8}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
