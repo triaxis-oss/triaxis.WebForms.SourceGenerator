@@ -14,10 +14,23 @@ WebForms apps can be built on Linux as part of an ordinary `dotnet build`.
 
 ## Status
 
-Pre-release. The generator has been validated against a 303-file corpus of
-real-world markup (Telerik / AjaxControlToolkit / user controls, nested
-masters), but the public surface is still settling — expect breaking
-changes until 1.0.
+Production-ready. The generator has been validated against a 303-file
+corpus of real-world markup (Telerik / AjaxControlToolkit / user controls,
+nested masters, two-way data binding, theming, master/content pages) and
+ships under semantic versioning from 1.0.
+
+## Not a Microsoft product
+
+This package is **not** affiliated with, endorsed by, or supported by
+Microsoft. ASP.NET WebForms remains a Microsoft technology and
+`System.Web` itself is shipped and supported by Microsoft as part of
+the .NET Framework, but the build-time alternative to `aspnet_compiler`
+implemented here is an independent third-party project. The reverse-
+engineered shapes the generator emits (page frame, `__BuildControl*`
+methods, `.compiled` sidecar format, `PrecompiledApp.config` semantics)
+are derived from observing what `aspnet_compiler` and `BuildManager`
+do — not from Microsoft documentation that guarantees they will keep
+doing it. Use at your own risk; report issues here, not to Microsoft.
 
 ## Install
 

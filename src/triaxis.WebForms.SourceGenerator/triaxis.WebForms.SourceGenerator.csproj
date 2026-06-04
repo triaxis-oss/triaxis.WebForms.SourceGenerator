@@ -12,6 +12,11 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <DevelopmentDependency>true</DevelopmentDependency>
+    <!-- NuGet pack flags tasks/netstandard2.0/*.dll with NU5100 ("not inside
+         lib/, won't be added as a reference"). Intentional — it's an
+         MSBuild-task assembly loaded by the consumer's MSBuild host, not a
+         project reference. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
     <!-- IncludeBuildOutput=false would leave the snupkg empty (no lib/ pdb),
          which trips NU5017. The analyzer dll's symbols ship inside the
          analyzer payload below, not as a separate snupkg. -->
