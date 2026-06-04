@@ -66,6 +66,28 @@
         MarkupFiles="@(_TriaxisMarkupForCompiled)" />
   </Target>
 
+  <!-- The .compiled stubs above sit in $(OutDir) but aren't part of any
+       built-in item group, so dotnet publish skips them. Add them to
+       ResolvedFileToPublish at the same level as the assembly; any
+       downstream bin/-reshuffling step (e.g. a consumer's custom
+       MoveBinariesToBinDirectory) picks them up alongside the dll. -->
+  <Target Name="TriaxisAddCompiledToPublish"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition=" '$(TriaxisWebFormsPublishCompiled)' != 'false' ">
+    <!-- Two-step on purpose: collect the .compiled glob into a fresh item
+         list first, then transfer with metadata. A single-step
+         `<ResolvedFileToPublish Include="$(OutDir)*.compiled"><RelativePath>%(Filename)%(Extension)…`
+         cross-product-batches against the EXISTING ResolvedFileToPublish
+         items (the metadata block batches against the target group, not the
+         items being included), corrupting RelativePath. -->
+    <ItemGroup>
+      <_TriaxisCompiledForPublish Include="$(OutDir)*.compiled" />
+      <ResolvedFileToPublish Include="@(_TriaxisCompiledForPublish)"
+                             RelativePath="%(_TriaxisCompiledForPublish.Filename)%(_TriaxisCompiledForPublish.Extension)"
+                             CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+
   <!-- After Publish, zero out each published markup file. The page type is
        already compiled into the assembly; BuildManager just needs the file
        to exist. Empty placeholders keep the deployment small and the
