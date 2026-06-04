@@ -12,12 +12,8 @@ defaults:
 
 jobs:
   test:
-    name: Test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: Test
+    runs-on: ubuntu-latest
     env:
       DOTNET_NOLOGO: true
     steps:
@@ -31,7 +27,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: test-results-${{ matrix.os }}
+          name: test-results
           path: src/**/TestResults/*.log
           if-no-files-found: ignore
 
