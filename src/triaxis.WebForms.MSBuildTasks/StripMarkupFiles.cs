@@ -13,7 +13,7 @@ namespace triaxis.WebForms.MSBuildTasks
     /// <c>.aspx</c> / <c>.ascx</c> / <c>.master</c> files can be empty —
     /// keeping source out of the deployment artifact and shrinking it.
     /// </summary>
-    public sealed class TriaxisStripMarkupFiles : Task
+    public sealed class StripMarkupFiles : Task
     {
         [Required] public ITaskItem[] Files { get; set; } = Array.Empty<ITaskItem>();
 

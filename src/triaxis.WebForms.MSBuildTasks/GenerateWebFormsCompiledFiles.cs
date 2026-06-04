@@ -21,7 +21,7 @@ namespace triaxis.WebForms.MSBuildTasks
     /// virtual path (<c>System.Web.Util.StringUtil.GetStringHashCode</c> of
     /// the app-relative dir), ported byte-for-byte below.
     /// </remarks>
-    public sealed class TriaxisGenerateWebFormsCompiledFiles : Task
+    public sealed class GenerateWebFormsCompiledFiles : Task
     {
         [Required] public string ProjectDir { get; set; } = string.Empty;
         [Required] public string OutputDir { get; set; } = string.Empty;

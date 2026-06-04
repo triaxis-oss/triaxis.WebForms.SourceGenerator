@@ -3,26 +3,55 @@
   <PropertyGroup>
     <!-- Auto-collect the markup corpus into AdditionalFiles. Set to false
          if the consumer project supplies its own AdditionalFiles list. -->
-    <TriaxisWebFormsCollectMarkup Condition=" '$(TriaxisWebFormsCollectMarkup)' == '' ">true</TriaxisWebFormsCollectMarkup>
+    <WebFormsGenCollectMarkup Condition=" '$(WebFormsGenCollectMarkup)' == '' ">true</WebFormsGenCollectMarkup>
     <!-- The markup file set the generator consumes and the .compiled
          sidecar emitter writes for. Hoisted so both consumers stay in
          lockstep; override to extend coverage. -->
-    <TriaxisWebFormsMarkupInclude Condition=" '$(TriaxisWebFormsMarkupInclude)' == '' ">**\*.aspx;**\*.ascx;**\*.master;Global.asax</TriaxisWebFormsMarkupInclude>
-    <TriaxisWebFormsMarkupExclude Condition=" '$(TriaxisWebFormsMarkupExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</TriaxisWebFormsMarkupExclude>
+    <WebFormsGenMarkupInclude Condition=" '$(WebFormsGenMarkupInclude)' == '' ">**\*.aspx;**\*.ascx;**\*.master;Global.asax</WebFormsGenMarkupInclude>
+    <WebFormsGenMarkupExclude Condition=" '$(WebFormsGenMarkupExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</WebFormsGenMarkupExclude>
     <!-- At publish, replace each markup file with a zero-byte placeholder:
          BuildManager only probes for existence once .compiled sidecars put
          the app in non-updatable precompiled mode, so the deployment
          doesn't need the source. Opt out with
-         TriaxisWebFormsStripPublishedMarkup=false. -->
-    <TriaxisWebFormsStripPublishedMarkup Condition=" '$(TriaxisWebFormsStripPublishedMarkup)' == '' ">true</TriaxisWebFormsStripPublishedMarkup>
+         WebFormsGenStripPublishedMarkup=false. -->
+    <WebFormsGenStripPublishedMarkup Condition=" '$(WebFormsGenStripPublishedMarkup)' == '' ">true</WebFormsGenStripPublishedMarkup>
+    <!-- Path-prefix the .compiled sidecars are added to ResolvedFileToPublish
+         under, relative to $(PublishDir). Leave empty when
+         WebFormsGenBinariesInBin is on (default) — the binaries-to-bin
+         move below relocates the dll, pdb, deps json AND the .compiled
+         sidecars in one shot. Consumers that disable the move (because
+         they already have an equivalent pipeline) typically set this to
+         `bin\` so the .compiled files still land where BuildManager
+         probes. Trailing path separator required when non-empty. -->
+    <WebFormsGenPublishCompiledRelativePath Condition=" '$(WebFormsGenPublishCompiledRelativePath)' == '' "></WebFormsGenPublishCompiledRelativePath>
+    <!-- After Publish file-list computation, move every non-content
+         item (host assembly, its pdb, deps json, our .compiled sidecars,
+         …) under PublishDir/bin/ to match the ASP.NET WebForms
+         deployment layout. Web content (aspx/ascx/master, web.config,
+         PrecompiledApp.config, images, scripts) stays at the publish
+         root. Disable when the consumer has an equivalent step. -->
+    <WebFormsGenBinariesInBin Condition=" '$(WebFormsGenBinariesInBin)' == '' ">true</WebFormsGenBinariesInBin>
+    <!-- Semicolon-separated list of filenames (e.g. "WinSCP.exe;Foo.dll")
+         that should be reclassified as binaries — moved to bin/ — even
+         when the SDK's content pipeline carries them as web content.
+         Match is by exact filename+extension; case-sensitive. Typical
+         use: native helpers shipped alongside the app that the WebForms
+         runtime expects in bin/. -->
+    <WebFormsGenAdditionalBinaries Condition=" '$(WebFormsGenAdditionalBinaries)' == '' "></WebFormsGenAdditionalBinaries>
+    <!-- After Publish, XDT-apply web.$(Configuration).config (e.g.
+         web.Release.config / web.Debug.config) onto the published
+         web.config. Uses the TransformXml MSBuild task registered by
+         Microsoft.NET.Sdk.Publish, which is loaded for any project
+         running dotnet publish. -->
+    <WebFormsGenTransformConfig Condition=" '$(WebFormsGenTransformConfig)' == '' ">true</WebFormsGenTransformConfig>
   </PropertyGroup>
 
   <ItemGroup>
     <CompilerVisibleProperty Include="MSBuildProjectDirectory" />
   </ItemGroup>
 
-  <ItemGroup Condition=" '$(TriaxisWebFormsCollectMarkup)' == 'true' ">
-    <AdditionalFiles Include="$(TriaxisWebFormsMarkupInclude)" Exclude="$(TriaxisWebFormsMarkupExclude)" />
+  <ItemGroup Condition=" '$(WebFormsGenCollectMarkup)' == 'true' ">
+    <AdditionalFiles Include="$(WebFormsGenMarkupInclude)" Exclude="$(WebFormsGenMarkupExclude)" />
     <!-- web.config <pages><controls> supplies site-wide tag-prefix → namespace
          mappings the generator needs to resolve control types. -->
     <AdditionalFiles Include="web.config" Condition=" Exists('web.config') " />
@@ -34,46 +63,64 @@
        time — which on Linux silently fails. Fail the build early with a
        copy-pasteable fix; the marker is a one-line config that belongs in
        source control alongside web.config. -->
-  <Target Name="TriaxisCheckPrecompiledAppConfig" BeforeTargets="Build"
-          Condition=" '$(TriaxisWebFormsCheckPrecompiledAppConfig)' != 'false' AND !Exists('$(MSBuildProjectDirectory)\PrecompiledApp.config') ">
+  <Target Name="_WebFormsGenCheckPrecompiledAppConfig" BeforeTargets="Build"
+          Condition=" '$(WebFormsGenCheckPrecompiledAppConfig)' != 'false' AND !Exists('$(MSBuildProjectDirectory)\PrecompiledApp.config') ">
     <Error Code="TWF001"
-           Text="PrecompiledApp.config is missing from the project root. The WebForms source generator requires it next to web.config so BuildManager enters precompiled mode. Create PrecompiledApp.config with this single line and commit it: &lt;precompiledApp version=&quot;2&quot; updatable=&quot;false&quot; /&gt;  Override with -p:TriaxisWebFormsCheckPrecompiledAppConfig=false." />
+           Text="PrecompiledApp.config is missing from the project root. The WebForms source generator requires it next to web.config so BuildManager enters precompiled mode. Create PrecompiledApp.config with this single line and commit it: &lt;precompiledApp version=&quot;2&quot; updatable=&quot;false&quot; /&gt;  Override with -p:WebFormsGenCheckPrecompiledAppConfig=false." />
   </Target>
 
-  <!-- The two MSBuild tasks live in tasks/netstandard2.0/, compiled from
+  <!-- MSBuild tasks live in tasks/netstandard2.0/, compiled from
        src/triaxis.WebForms.MSBuildTasks/ and packed alongside the analyzer.
        Loading the dll once instead of building a Roslyn-RoslynCodeTaskFactory
        task inline per build avoids ~120 lines of unreviewable C# in XML. -->
-  <UsingTask TaskName="triaxis.WebForms.MSBuildTasks.TriaxisGenerateWebFormsCompiledFiles"
+  <UsingTask TaskName="triaxis.WebForms.MSBuildTasks.GenerateWebFormsCompiledFiles"
              AssemblyFile="$(MSBuildThisFileDirectory)..\tasks\netstandard2.0\triaxis.WebForms.MSBuildTasks.dll" />
-  <UsingTask TaskName="triaxis.WebForms.MSBuildTasks.TriaxisStripMarkupFiles"
+  <UsingTask TaskName="triaxis.WebForms.MSBuildTasks.StripMarkupFiles"
              AssemblyFile="$(MSBuildThisFileDirectory)..\tasks\netstandard2.0\triaxis.WebForms.MSBuildTasks.dll" />
+
+  <!-- The TransformXml MSBuild task ships only inside Microsoft.NET.Sdk.Publish,
+       and a plain <Project Sdk="Microsoft.NET.Sdk"> doesn't auto-import that
+       SDK on `dotnet publish`. Locate its task assembly under the SDK install
+       and register the <UsingTask> ourselves. Skip when the SDK is already
+       loaded (its own UsingTask is in scope), to avoid registering twice.
+       The cascading fallbacks below cover .NET Framework MSBuild and the
+       net{N}.0 layouts of recent SDKs — add a new line at the top if a
+       newer SDK ships under a higher tfm. -->
+  <PropertyGroup Condition=" '$(WebFormsGenTransformConfig)' == 'true' AND '$(_PublishTaskAssemblyFullPath)' == '' ">
+    <_WebFormsGenSdkPublishTools>$(MSBuildSDKsPath)\Microsoft.NET.Sdk.Publish\tools\</_WebFormsGenSdkPublishTools>
+    <_WebFormsGenPublishTaskAssembly Condition=" '$(MSBuildRuntimeType)' == 'Core' AND Exists('$(_WebFormsGenSdkPublishTools)net10.0\Microsoft.NET.Sdk.Publish.Tasks.dll') ">$(_WebFormsGenSdkPublishTools)net10.0\Microsoft.NET.Sdk.Publish.Tasks.dll</_WebFormsGenPublishTaskAssembly>
+    <_WebFormsGenPublishTaskAssembly Condition=" '$(_WebFormsGenPublishTaskAssembly)' == '' AND '$(MSBuildRuntimeType)' == 'Core' AND Exists('$(_WebFormsGenSdkPublishTools)net9.0\Microsoft.NET.Sdk.Publish.Tasks.dll') ">$(_WebFormsGenSdkPublishTools)net9.0\Microsoft.NET.Sdk.Publish.Tasks.dll</_WebFormsGenPublishTaskAssembly>
+    <_WebFormsGenPublishTaskAssembly Condition=" '$(_WebFormsGenPublishTaskAssembly)' == '' AND '$(MSBuildRuntimeType)' == 'Core' AND Exists('$(_WebFormsGenSdkPublishTools)net8.0\Microsoft.NET.Sdk.Publish.Tasks.dll') ">$(_WebFormsGenSdkPublishTools)net8.0\Microsoft.NET.Sdk.Publish.Tasks.dll</_WebFormsGenPublishTaskAssembly>
+    <_WebFormsGenPublishTaskAssembly Condition=" '$(_WebFormsGenPublishTaskAssembly)' == '' AND Exists('$(_WebFormsGenSdkPublishTools)net472\Microsoft.NET.Sdk.Publish.Tasks.dll') ">$(_WebFormsGenSdkPublishTools)net472\Microsoft.NET.Sdk.Publish.Tasks.dll</_WebFormsGenPublishTaskAssembly>
+  </PropertyGroup>
+  <UsingTask TaskName="TransformXml"
+             AssemblyFile="$(_WebFormsGenPublishTaskAssembly)"
+             Condition=" '$(_WebFormsGenPublishTaskAssembly)' != '' " />
 
   <!-- Emit lean .compiled stubs pointing BuildManager at the Roslyn-generated
        ASP.* types in the main app assembly, replacing the
        aspnet_compiler / aspnet_merge precompile. -->
-  <Target Name="TriaxisGenerateWebFormsCompiled" AfterTargets="Build">
+  <Target Name="_WebFormsGenGenerateCompiled" AfterTargets="Build">
     <!-- Same include/exclude as the generator's AdditionalFiles up top; the
          property hoist keeps these two consumers from drifting. -->
     <ItemGroup>
-      <_TriaxisMarkupForCompiled Include="$(TriaxisWebFormsMarkupInclude)"
-                                 Exclude="$(TriaxisWebFormsMarkupExclude)" />
+      <_WebFormsGenMarkupForCompiled Include="$(WebFormsGenMarkupInclude)"
+                                 Exclude="$(WebFormsGenMarkupExclude)" />
     </ItemGroup>
-    <triaxis.WebForms.MSBuildTasks.TriaxisGenerateWebFormsCompiledFiles
+    <triaxis.WebForms.MSBuildTasks.GenerateWebFormsCompiledFiles
         ProjectDir="$(MSBuildProjectDirectory)"
         OutputDir="$(OutDir)"
         AssemblyName="$(AssemblyName)"
-        MarkupFiles="@(_TriaxisMarkupForCompiled)" />
+        MarkupFiles="@(_WebFormsGenMarkupForCompiled)" />
   </Target>
 
   <!-- The .compiled stubs above sit in $(OutDir) but aren't part of any
        built-in item group, so dotnet publish skips them. Add them to
-       ResolvedFileToPublish at the same level as the assembly; any
-       downstream bin/-reshuffling step (e.g. a consumer's custom
-       MoveBinariesToBinDirectory) picks them up alongside the dll. -->
-  <Target Name="TriaxisAddCompiledToPublish"
+       ResolvedFileToPublish; when WebFormsGenBinariesInBin is on the
+       move target below picks them up alongside the dll/pdb/deps. -->
+  <Target Name="_WebFormsGenAddCompiledToPublish"
           AfterTargets="ComputeResolvedFilesToPublishList"
-          Condition=" '$(TriaxisWebFormsPublishCompiled)' != 'false' ">
+          Condition=" '$(WebFormsGenPublishCompiled)' != 'false' ">
     <!-- Two-step on purpose: collect the .compiled glob into a fresh item
          list first, then transfer with metadata. A single-step
          `<ResolvedFileToPublish Include="$(OutDir)*.compiled"><RelativePath>%(Filename)%(Extension)…`
@@ -81,10 +128,40 @@
          items (the metadata block batches against the target group, not the
          items being included), corrupting RelativePath. -->
     <ItemGroup>
-      <_TriaxisCompiledForPublish Include="$(OutDir)*.compiled" />
-      <ResolvedFileToPublish Include="@(_TriaxisCompiledForPublish)"
-                             RelativePath="%(_TriaxisCompiledForPublish.Filename)%(_TriaxisCompiledForPublish.Extension)"
-                             CopyToPublishDirectory="PreserveNewest" />
+      <_WebFormsGenCompiledForPublish Include="$(OutDir)*.compiled" />
+      <ResolvedFileToPublish Include="@(_WebFormsGenCompiledForPublish)"
+                             RelativePath="$(WebFormsGenPublishCompiledRelativePath)%(_WebFormsGenCompiledForPublish.Filename)%(_WebFormsGenCompiledForPublish.Extension)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Move every non-content publish item under PublishDir/bin/ — the
+       host assembly, its pdb, deps json, and our .compiled sidecars all
+       go to bin/; everything that came in via the SDK's content pipeline
+       (aspx/ascx/master, web.config, PrecompiledApp.config, images,
+       scripts) stays at the publish root. Mirrors the
+       MM_MoveBinariesToBinDirectory pattern, but packaged so consumers
+       don't have to maintain it themselves. Runs AFTER
+       _WebFormsGenAddCompiledToPublish so the .compiled entries are in the
+       snapshot at split time. -->
+  <Target Name="_WebFormsGenMoveBinariesToBin"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          DependsOnTargets="_WebFormsGenAddCompiledToPublish"
+          Condition=" '$(WebFormsGenBinariesInBin)' == 'true' ">
+    <PropertyGroup>
+      <!-- Semicolon-bordered guard string so .Contains() can be used as
+           a set membership test below: ";WinSCP.exe;Foo.dll;".Contains(';X;'). -->
+      <_WebFormsGenAdditionalGuarded>;$(WebFormsGenAdditionalBinaries);</_WebFormsGenAdditionalGuarded>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- Build the content set from the SDK's content publish list,
+           dropping anything whose filename+extension is in
+           $(WebFormsGenAdditionalBinaries). Dropped items then fall
+           through to the binaries bucket below and get moved to bin/. -->
+      <_WebFormsGenPublishedContent Include="@(AllPublishItemsFullPathWithTargetPath)"
+          Condition=" !$(_WebFormsGenAdditionalGuarded.Contains(';%(Filename)%(Extension);')) " />
+      <_WebFormsGenPublishedBinaries Include="@(ResolvedFileToPublish)" Exclude="@(_WebFormsGenPublishedContent)" />
+      <ResolvedFileToPublish Remove="@(_WebFormsGenPublishedBinaries)" />
+      <ResolvedFileToPublish Include="@(_WebFormsGenPublishedBinaries)" RelativePath="bin\%(RelativePath)" />
     </ItemGroup>
   </Target>
 
@@ -92,13 +169,28 @@
        already compiled into the assembly; BuildManager just needs the file
        to exist. Empty placeholders keep the deployment small and the
        source out of the artifact. -->
-  <Target Name="TriaxisStripPublishedMarkup" AfterTargets="Publish"
-          Condition=" '$(TriaxisWebFormsStripPublishedMarkup)' == 'true' ">
+  <Target Name="_WebFormsGenStripPublishedMarkup" AfterTargets="Publish"
+          Condition=" '$(WebFormsGenStripPublishedMarkup)' == 'true' ">
     <ItemGroup>
-      <_TriaxisPublishedMarkup Include="$(PublishDir)**\*.aspx;$(PublishDir)**\*.ascx;$(PublishDir)**\*.master" />
+      <_WebFormsGenPublishedMarkup Include="$(PublishDir)**\*.aspx;$(PublishDir)**\*.ascx;$(PublishDir)**\*.master" />
     </ItemGroup>
-    <triaxis.WebForms.MSBuildTasks.TriaxisStripMarkupFiles
-        Files="@(_TriaxisPublishedMarkup)" />
+    <triaxis.WebForms.MSBuildTasks.StripMarkupFiles
+        Files="@(_WebFormsGenPublishedMarkup)" />
+  </Target>
+
+  <!-- After Publish, XDT-transform the published web.config with the
+       configuration-specific transform (web.Release.config /
+       web.Debug.config / web.<Custom>.config) if it exists at the
+       project root. The transform runs in place on the published
+       web.config so the original source web.config is unchanged. -->
+  <Target Name="_WebFormsGenTransformWebConfig" AfterTargets="Publish"
+          Condition=" '$(WebFormsGenTransformConfig)' == 'true' AND Exists('$(MSBuildProjectDirectory)\web.$(Configuration).config') AND Exists('$(PublishDir)web.config') ">
+    <!-- TransformXml is registered by Microsoft.NET.Sdk.Publish, which is
+         loaded by the publish target tree before AfterTargets="Publish"
+         fires, so no <UsingTask> is needed here. -->
+    <TransformXml Source="$(PublishDir)web.config"
+                  Transform="$(MSBuildProjectDirectory)\web.$(Configuration).config"
+                  Destination="$(PublishDir)web.config" />
   </Target>
 
 </Project>

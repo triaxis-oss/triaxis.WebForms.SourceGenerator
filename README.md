@@ -42,20 +42,75 @@ The package ships only an analyzer DLL (`analyzers/dotnet/cs/`) and a
 `buildTransitive` targets file. There is no runtime library — the generated
 page types are compiled directly into your assembly.
 
-## What the package does to your project
+## What the package does at build time
 
 When referenced, the bundled `buildTransitive` targets:
 
 - Glob `**/*.aspx`, `**/*.ascx`, `**/*.master`, `Global.asax`, and `web.config`
-  into `AdditionalFiles` (opt out with `<TriaxisWebFormsCollectMarkup>false</TriaxisWebFormsCollectMarkup>`).
+  into `AdditionalFiles` (opt out with `<WebFormsGenCollectMarkup>false</WebFormsGenCollectMarkup>`).
 - Verify before `Build` that `PrecompiledApp.config` exists at the project
   root next to `web.config`. Without it `BuildManager` never enters
   precompiled mode and the generated pages are ignored at runtime — so the
   check fails the build (error `TWF001`) with a copy-pasteable fix. Opt
-  out with `<TriaxisWebFormsCheckPrecompiledAppConfig>false</TriaxisWebFormsCheckPrecompiledAppConfig>`.
+  out with `<WebFormsGenCheckPrecompiledAppConfig>false</WebFormsGenCheckPrecompiledAppConfig>`.
 - After `Build`, emit a lean `.compiled` stub per markup file into
   `$(OutDir)` pointing `BuildManager` at the Roslyn-generated
   `ASP.<name>_aspx` type.
+
+## What the package does at publish time
+
+`dotnet publish` produces a complete, deployable ASP.NET WebForms layout
+out of the box. Each step is gated by its own property, so consumers
+that already maintain an equivalent step can opt out cleanly:
+
+- **Add the `.compiled` sidecars to the publish file list.** They're
+  emitted to `$(OutDir)` by the build target above but aren't members of
+  any built-in publish item group, so the SDK skips them without this
+  hook. Opt out: `<WebFormsGenPublishCompiled>false</WebFormsGenPublishCompiled>`.
+- **Relocate every binary to `<publish>/bin/`.** The host assembly, its
+  `.pdb` / `.deps.json`, and the `.compiled` sidecars move to `bin/`;
+  everything that came in via the SDK's content pipeline (`.aspx` /
+  `.ascx` / `.master`, `web.config`, `PrecompiledApp.config`, static
+  assets) stays at the publish root. Opt out:
+  `<WebFormsGenBinariesInBin>false</WebFormsGenBinariesInBin>`.
+
+  For native helpers and other files that arrive as content but need
+  to sit alongside the host assembly (e.g. `WinSCP.exe`), list them in
+  `WebFormsGenAdditionalBinaries` (semicolon-separated, matched by
+  exact filename + extension):
+  ```xml
+  <PropertyGroup>
+    <WebFormsGenAdditionalBinaries>WinSCP.exe;NativeHelper.dll</WebFormsGenAdditionalBinaries>
+  </PropertyGroup>
+  ```
+- **Zero out the published markup files.** Each `.aspx` / `.ascx` /
+  `.master` in `$(PublishDir)` is truncated to zero bytes. The page
+  type already lives in the host assembly and the `.compiled` sidecar
+  routes `BuildManager` to it, so the file only needs to exist for the
+  runtime probe — its content can leave the deployment. Opt out:
+  `<WebFormsGenStripPublishedMarkup>false</WebFormsGenStripPublishedMarkup>`.
+- **XDT-transform `web.config`.** If `web.$(Configuration).config`
+  (e.g. `web.Release.config`, `web.Debug.config`) exists at the project
+  root, it's applied to the published `web.config` using the
+  `TransformXml` MSBuild task shipped by `Microsoft.NET.Sdk.Publish`.
+  Source `web.config` is untouched. Opt out:
+  `<WebFormsGenTransformConfig>false</WebFormsGenTransformConfig>`.
+
+A typical `dotnet publish` of a WebForms app produces:
+
+```
+<publish>/
+  bin/
+    <App>.dll
+    <App>.pdb
+    <App>.deps.json
+    App_global.asax.compiled
+    <page>.<hash>.compiled  …  (one per markup file)
+  web.config                  (transformed)
+  PrecompiledApp.config
+  Forms/Foo.aspx              (zero bytes)
+  …
+```
 
 ## How markup attribute values are converted
 
