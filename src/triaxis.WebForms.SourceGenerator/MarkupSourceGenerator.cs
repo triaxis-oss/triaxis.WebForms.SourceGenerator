@@ -279,6 +279,7 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
 
         string source = PageEmitter.Emit(parsed.Directive, file.VirtualPath, root, resolver, file.Content, binder,
             classify, isControlContainer, isThemeable, isControl, userControlBindingType, pageDefaults, out _,
+            out IReadOnlyList<Emit.ControlTreeEmitter.FieldBindingMismatch> fieldBindingMismatches,
             (id, controlMetadata) => ResolveCodeBehindField(compilation, codeBehind, id, controlMetadata),
             usings,
             id => CodeBehindHasMember(codeBehind, id));
@@ -286,6 +287,13 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         foreach (string typeName in layer3Fallbacks)
         {
             context.ReportDiagnostic(Diagnostic.Create(s_layer3Fallback, Location.None, typeName));
+        }
+
+        foreach (Emit.ControlTreeEmitter.FieldBindingMismatch mismatch in fieldBindingMismatches)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                s_fieldBindingMismatch, Location.None,
+                mismatch.ControlId, mismatch.ResolvedType, mismatch.ExistingFieldType, file.VirtualPath));
         }
 
         string hint = GeneratedNaming.TypeNameFromVirtualPath(file.VirtualPath) + ".g.cs";
@@ -492,13 +500,22 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
     // Returns the canonical codebehind member name to assign the control to
     // (this.<name> = __ctrl;), or null when there's no settable member of a
     // compatible type — keeping the assignment compile-safe.
-    private static string? ResolveCodeBehindField(Compilation compilation, INamedTypeSymbol? codeBehind, string id, string controlTypeMetadataName)
+    // Tri-state result:
+    //   (name, null)  → assignable codebehind member; emit `this.<name> = __ctrl;`
+    //   (null, type)  → member exists but isn't assignable from the resolved
+    //                   control type. The framework would silently drop the
+    //                   assignment, leaving the field null at runtime (NRE on
+    //                   first access). Surfaced as TWF003 by the caller.
+    //   (null, null)  → no such member; emitter declares one.
+    private static (string? AssignableField, string? ConflictingType) ResolveCodeBehindField(
+        Compilation compilation, INamedTypeSymbol? codeBehind, string id, string controlTypeMetadataName)
     {
         if (codeBehind is null || compilation.GetTypeByMetadataName(controlTypeMetadataName) is not INamedTypeSymbol controlType)
         {
-            return null;
+            return (null, null);
         }
 
+        string? firstConflict = null;
         for (INamedTypeSymbol? t = codeBehind; t != null; t = t.BaseType)
         {
             foreach (ISymbol member in t.GetMembers())
@@ -516,14 +533,24 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
                     _ => null,
                 };
 
-                if (target != null && IsAssignableTo(controlType, target))
+                if (target is null)
                 {
-                    return member.Name;
+                    continue;
                 }
+
+                if (IsAssignableTo(controlType, target))
+                {
+                    return (member.Name, null);
+                }
+
+                // First settable same-named member whose type isn't assignable —
+                // record so the caller can emit TWF003 if no assignable member
+                // turns up higher in the hierarchy.
+                firstConflict ??= target.ToDisplayString();
             }
         }
 
-        return null;
+        return (null, firstConflict);
     }
 
     private static bool IsAssignableTo(ITypeSymbol from, ITypeSymbol to)
@@ -837,6 +864,20 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true);
 
+    // A markup control resolves to a type that isn't assignable to the
+    // same-named existing codebehind field. The framework would silently
+    // drop the field assignment, leaving the field null at runtime (NRE
+    // on first access). Surfacing as Error means the build fails with a
+    // fixable diagnostic instead of going green and crashing in the
+    // browser.
+    private static readonly DiagnosticDescriptor s_fieldBindingMismatch = new(
+        "TWF003",
+        "WebForms control type not assignable to codebehind field",
+        "Control '{0}' (in {3}) resolves to '{1}', which is not assignable to the existing codebehind field of type '{2}'. The field would silently stay null at runtime — either change the codebehind field type to one assignable from '{1}', rename one side, or drop the runat=\"server\" on the markup.",
+        "Triaxis.WebForms",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
     // Forwarder kept for the file's existing call sites (no behavior change).
     // New code should call Emit.CodeLiteral.Escape directly.
     internal static string StringLiteral(string value) => CodeLiteral.Escape(value);
@@ -917,7 +958,7 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
             int colon = rawName.IndexOf(':');
             string? prefix = colon < 0 ? null : rawName.Substring(0, colon);
             string tag = colon < 0 ? rawName : rawName.Substring(colon + 1);
-            if (resolver.Resolve(prefix, tag) is not { } resolved)
+            if (resolver.Resolve(prefix, tag, parentMetadata: parentMetadata) is not { } resolved)
             {
                 return (null, false);
             }

@@ -21,7 +21,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             System.Func<string, string> userControlBindingType,
             IReadOnlyDictionary<string, string> pageDefaults,
             out IReadOnlyList<string> diagnostics,
-            System.Func<string, string, string?>? codeBehindField = null,
+            out IReadOnlyList<ControlTreeEmitter.FieldBindingMismatch> fieldBindingMismatches,
+            System.Func<string, string, (string?, string?)>? codeBehindField = null,
             System.Collections.Generic.IEnumerable<string>? usings = null,
             System.Func<string, bool>? codeBehindHasMember = null)
         {
@@ -44,6 +45,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 isThemeable, isControl, userControlBindingType, themeTarget, pageDefaults, codeBehindField, codeBehindHasMember);
             ControlTreeEmitter.Result result = tree.Emit(root, directive);
             diagnostics = result.Diagnostics;
+            fieldBindingMismatches = result.FieldBindingMismatches;
 
             // ValidateRequestMode follows the effective ValidateRequest (page
             // directive over web.config <pages>, default true): false → Disabled.

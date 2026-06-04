@@ -79,9 +79,10 @@ public class EmitterTests
         bool Control(string type) => false;
 
         string UcBindingType(string t) => "System.Web.UI.UserControl";
-        string source = PageEmitter.Emit(parsed.Directive!, "/Default.aspx", root, new ControlTypeResolver(), SamplePage, Binder, Classify, ControlContainer, Themeable, Control, UcBindingType, new System.Collections.Generic.Dictionary<string, string>(), out IReadOnlyList<string> diagnostics);
+        string source = PageEmitter.Emit(parsed.Directive!, "/Default.aspx", root, new ControlTypeResolver(), SamplePage, Binder, Classify, ControlContainer, Themeable, Control, UcBindingType, new System.Collections.Generic.Dictionary<string, string>(), out IReadOnlyList<string> diagnostics, out IReadOnlyList<ControlTreeEmitter.FieldBindingMismatch> mismatches);
 
         Assert.Empty(diagnostics);
+        Assert.Empty(mismatches);
         Assert.Contains("__BuildControlform1()", source);
         Assert.Contains("__BuildControllbl()", source);
         Assert.Contains("new global::System.Web.UI.WebControls.Label()", source);

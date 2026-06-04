@@ -70,6 +70,20 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 ["image"] = "HtmlInputImage",
             };
 
+        // Tags that aspnet_compiler maps to their specific Html* type only
+        // when hosted directly inside a server <head> — HtmlHeadBuilder is
+        // the source of the specific binding, and it's only invoked for
+        // children of HtmlHead. Outside that context (e.g. a server-side
+        // <link> in the body, or directly under the page root) the
+        // framework produces HtmlGenericControl. Map link/meta/title to
+        // HtmlLink/HtmlMeta/HtmlTitle only under HtmlHead; tr/td/th have
+        // similar parent-context shapes but aren't covered here pending
+        // a corpus-driven audit.
+        private static readonly HashSet<string> s_headOnlyTags =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "title", "link", "meta" };
+
+        private const string HtmlHeadMetadata = HtmlControlsNs + ".HtmlHead";
+
         // HtmlControls types whose constructor takes the rendered tag name
         // (new HtmlHead("head"), new HtmlTableCell("td")/("th")). The
         // ASP.NET compiler emits this argument so the runtime TagName
@@ -109,7 +123,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             _resolveCanonical = resolveCanonical;
         }
 
-        public ResolvedControl? Resolve(string? prefix, string tagName, string? inputType = null)
+        public ResolvedControl? Resolve(string? prefix, string tagName, string? inputType = null, string? parentMetadata = null)
         {
             if (prefix is null)
             {
@@ -118,7 +132,9 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     return ResolveInput(inputType);
                 }
 
-                if (s_htmlControls.TryGetValue(tagName, out string? html))
+                if (s_htmlControls.TryGetValue(tagName, out string? html)
+                    && (!s_headOnlyTags.Contains(tagName)
+                        || string.Equals(parentMetadata, HtmlHeadMetadata, StringComparison.Ordinal)))
                 {
                     string metadata = HtmlControlsNs + "." + html;
                     if (Exists(metadata))
@@ -131,7 +147,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     }
                 }
 
-                // Any other runat="server" HTML element is an HtmlGenericControl.
+                // Any other runat="server" HTML element — and head-only tags
+                // outside a server <head> — fall through to HtmlGenericControl.
                 string generic = HtmlControlsNs + ".HtmlGenericControl";
                 return new ResolvedControl("global::" + generic, generic, Quote(tagName));
             }

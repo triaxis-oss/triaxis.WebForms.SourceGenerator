@@ -32,7 +32,12 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         private readonly ControlTypeResolver _resolver;
         private readonly string _fileText;
         private readonly AttributeBinder _binder;
-        private readonly Func<string, string, string?> _resolveCodeBehindField;
+        // Returns (assignable-field-name, conflicting-existing-type-display):
+        //   (name, null)  → field exists and resolved control type is assignable
+        //   (null, type)  → field exists but resolved control type is NOT assignable
+        //                   (silent drop bug surfaces as TWF003)
+        //   (null, null)  → no such member; emitter declares one
+        private readonly Func<string, string, (string? AssignableField, string? ConflictingType)> _resolveCodeBehindField;
         private readonly Func<string, bool> _codeBehindHasMember;
         private readonly HashSet<string> _declaredFields = new HashSet<string>(StringComparer.Ordinal);
         private readonly ChildClassifier _classify;
@@ -66,7 +71,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             Func<string, string> userControlBindingType,
             string themeTarget,
             IReadOnlyDictionary<string, string> pageDefaults,
-            Func<string, string, string?>? resolveCodeBehindField = null,
+            Func<string, string, (string?, string?)>? resolveCodeBehindField = null,
             Func<string, bool>? codeBehindHasMember = null)
         {
             _resolver = resolver;
@@ -80,7 +85,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             _userControlBindingType = userControlBindingType;
             _themeTarget = themeTarget;
             _pageDefaults = pageDefaults;
-            _resolveCodeBehindField = resolveCodeBehindField ?? ((_, _) => null);
+            _resolveCodeBehindField = resolveCodeBehindField ?? ((_, _) => (null, null));
             _codeBehindHasMember = codeBehindHasMember ?? (_ => false);
         }
 
@@ -105,11 +110,21 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             public string TreeBody { get; set; } = string.Empty;
             public string Methods { get; set; } = string.Empty;
             public IReadOnlyList<string> Diagnostics { get; set; } = System.Array.Empty<string>();
+            public IReadOnlyList<FieldBindingMismatch> FieldBindingMismatches { get; set; } = System.Array.Empty<FieldBindingMismatch>();
 
             /// <summary>Lowercased IDs of the master's ContentPlaceHolder controls,
             /// which the master ctor must register via ContentPlaceHolders.Add.</summary>
             public IReadOnlyList<string> ContentPlaceHolderIds { get; set; } = System.Array.Empty<string>();
         }
+
+        /// <summary>A control whose resolved type isn't assignable to a
+        /// same-named existing codebehind field. The framework would
+        /// silently drop the field assignment, leaving the field null at
+        /// runtime (NRE on first access); the generator surfaces this as
+        /// TWF003 instead.</summary>
+        public readonly record struct FieldBindingMismatch(string ControlId, string ResolvedType, string ExistingFieldType);
+
+        private readonly List<FieldBindingMismatch> _fieldBindingMismatches = new List<FieldBindingMismatch>();
 
         public Result Emit(ServerControlNode root, MarkupDirective directive)
         {
@@ -152,6 +167,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 TreeBody = body.ToSource().TrimEnd('\r', '\n'),
                 Methods = _methods.ToString().TrimEnd('\r', '\n'),
                 Diagnostics = _diagnostics,
+                FieldBindingMismatches = _fieldBindingMismatches,
                 ContentPlaceHolderIds = _contentPlaceHolderIds,
             };
         }
@@ -242,7 +258,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
             if (hasCodeBlocks)
             {
-                EmitRenderMethodContainer(children, parentVar, w);
+                EmitRenderMethodContainer(children, parentVar, parentMetadata, w);
                 return;
             }
 
@@ -423,7 +439,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             {
                 case ChildPlacementKind.ParsedSubObject:
                 {
-                    string? method = EmitControl(control, templateBody);
+                    string? method = EmitControl(control, parentMetadata, templateBody);
                     if (method != null)
                     {
                         w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({method}());");
@@ -441,7 +457,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
                 case ChildPlacementKind.CollectionItem:
                 {
-                    string? method = EmitControl(control, templateBody);
+                    string? method = EmitControl(control, parentMetadata, templateBody);
                     if (method != null)
                     {
                         w.Line($"{parentVar}.{placement.Member}.Add({method}());");
@@ -455,7 +471,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     {
                         if (grandChild is ServerControlNode item)
                         {
-                            string? method = EmitControl(item);
+                            string? method = EmitControl(item, parentMetadata);
                             if (method != null)
                             {
                                 w.Line($"{parentVar}.{placement.Member}.Add({method}());");
@@ -687,7 +703,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             }
         }
 
-        private string? EmitControl(ServerControlNode node, bool directTemplateChild = false)
+        private string? EmitControl(ServerControlNode node, string parentMetadata, bool directTemplateChild = false)
         {
             // <input>'s concrete HtmlInputControl type depends on its type attribute.
             string? inputType = null;
@@ -700,7 +716,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 }
             }
 
-            ResolvedControl? resolved = _resolver.Resolve(node.Prefix, node.TagName, inputType);
+            ResolvedControl? resolved = _resolver.Resolve(node.Prefix, node.TagName, inputType, parentMetadata);
             if (resolved is null)
             {
                 _diagnostics.Add($"unresolved control <{node.RawName}> — prefix '{node.Prefix}' has no known namespace");
@@ -757,7 +773,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     {
                         // Assign the codebehind's control field (this.cmdLogin = __ctrl;);
                         // for inline pages with no codebehind field, declare one.
-                        string? field = _resolveCodeBehindField(node.Id, rc.MetadataName);
+                        (string? field, string? conflictingType) = _resolveCodeBehindField(node.Id, rc.MetadataName);
                         if (field != null)
                         {
                             m.Line($"this.{field} = __ctrl;");
@@ -770,7 +786,17 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                             // validated when the consumer assembly compiles.
                             m.Line($"this.{Sanitize(node.Id)} = __ctrl;");
                         }
-                        else if (!_codeBehindHasMember(node.Id))
+                        else if (conflictingType != null)
+                        {
+                            // Field exists but the resolved control type isn't
+                            // assignable to it. The framework would silently drop the
+                            // assignment, leaving the field null at runtime (NRE on
+                            // first access). Surface as TWF003 so the build fails
+                            // with a fixable diagnostic instead of going green and
+                            // crashing in the browser.
+                            _fieldBindingMismatches.Add(new FieldBindingMismatch(node.Id, rc.MetadataName, conflictingType));
+                        }
+                        else
                         {
                             string decl = Sanitize(node.Id);
                             if (_declaredFields.Add(decl))
@@ -901,7 +927,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         // parameterContainer.Controls[i], while <%= %>/<%: %>/<% %> write inline. A
         // region with no data-binding keeps its static text inline rather than
         // wrapping it in literal children, matching the compiler's simpler shape.
-        private void EmitRenderMethodContainer(IReadOnlyList<MarkupNode> children, string parentVar, IndentedTextWriter w)
+        private void EmitRenderMethodContainer(IReadOnlyList<MarkupNode> children, string parentVar, string parentMetadata, IndentedTextWriter w)
         {
             var segments = new List<(char Kind, string Text, ServerControlNode? Control)>();
             foreach (MarkupNode child in children)
@@ -977,7 +1003,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         break;
                     case 'C':
                         FlushRun();
-                        string? method = EmitControl(control!);
+                        string? method = EmitControl(control!, parentMetadata);
                         if (method != null)
                         {
                             w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({method}());");

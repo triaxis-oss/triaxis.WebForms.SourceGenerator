@@ -847,6 +847,91 @@ public class GeneratorDriverTests
         Assert.Single(result.GeneratedTrees, t => t.FilePath.EndsWith("c_ascx.g.cs"));
     }
 
+    [Fact]
+    public void Link_outside_server_head_maps_to_HtmlGenericControl()
+    {
+        // aspnet_compiler maps <link runat="server"> to HtmlLink only when
+        // it's hosted directly inside a server <head> (HtmlHeadBuilder is
+        // the source of the specific binding). Outside that context — a
+        // <link> in the body, or directly under the page root — the
+        // framework produces HtmlGenericControl. The bug: the resolver
+        // mapped <link> to HtmlLink unconditionally; when the codebehind
+        // declared `HtmlGenericControl Style`, the field assignment got
+        // silently dropped (HtmlLink not assignable to HtmlGenericControl)
+        // and the field stayed null at runtime.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } }\n" +
+            "  public class HtmlGenericControl : System.Web.UI.Control, System.Web.UI.IParserAccessor { public HtmlGenericControl(string tag) { } public void AddParsedSubObject(object o) { } }\n" +
+            "  public class HtmlLink : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Foo { public class Bar : System.Web.UI.Page { protected System.Web.UI.HtmlControls.HtmlGenericControl Style; } }\n" +
+            "namespace System.Web.UI { public class Page : Control { } }\n";
+        string text = RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\">" +
+            "<link runat=\"server\" id=\"Style\" />" +
+            "</form>\r\n");
+
+        // Outside <head>, <link> falls through to HtmlGenericControl with
+        // the tag name as the constructor argument.
+        Assert.Contains("new global::System.Web.UI.HtmlControls.HtmlGenericControl(\"link\")", text);
+        Assert.DoesNotContain("new global::System.Web.UI.HtmlControls.HtmlLink", text);
+        // Codebehind field assignment present — the runtime NRE root cause.
+        Assert.Contains("this.Style = __ctrl;", text);
+    }
+
+    [Fact]
+    public void Link_inside_server_head_still_maps_to_HtmlLink()
+    {
+        // The companion to Link_outside_server_head_maps_to_HtmlGenericControl
+        // — under a server <head>, <link> / <meta> / <title> still resolve
+        // to their specific Html* types, matching HtmlHeadBuilder.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlHead : System.Web.UI.Control, System.Web.UI.IParserAccessor { public HtmlHead() { } public HtmlHead(string tag) { } public void AddParsedSubObject(object o) { } }\n" +
+            "  public class HtmlLink : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Foo { public class Bar : System.Web.UI.Page { protected System.Web.UI.HtmlControls.HtmlLink Style; } }\n" +
+            "namespace System.Web.UI { public class Page : Control { } }\n";
+        string text = RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<head runat=\"server\"><link runat=\"server\" id=\"Style\" /></head>\r\n");
+
+        Assert.Contains("new global::System.Web.UI.HtmlControls.HtmlLink()", text);
+        Assert.Contains("this.Style = __ctrl;", text);
+    }
+
+    [Fact]
+    public void Codebehind_field_type_mismatch_emits_TWF003()
+    {
+        // The resolved control type isn't assignable to the same-named
+        // codebehind field. Without the diagnostic the field assignment
+        // is silently dropped and the field stays null at runtime (NRE
+        // on first access). TWF003 is an Error: the build fails with a
+        // fixable message instead.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace System.Web.UI.WebControls { public class Label : System.Web.UI.Control { } }\n" +
+            "namespace Foo { public class Bar : System.Web.UI.Page { protected System.Web.UI.HtmlControls.HtmlForm Mismatch; } }\n" +
+            "namespace System.Web.UI { public class Page : Control { } }\n";
+        RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\">" +
+            "<asp:Label runat=\"server\" ID=\"Mismatch\" />" +
+            "</form>\r\n",
+            out GeneratorDriverRunResult result);
+
+        Diagnostic diagnostic = Assert.Single(result.Results.Single().Diagnostics, d => d.Id == "TWF003");
+        // Carries the control id, the resolved type and the conflicting field type.
+        string message = diagnostic.GetMessage();
+        Assert.Contains("Mismatch", message);
+        Assert.Contains("System.Web.UI.WebControls.Label", message);
+        Assert.Contains("System.Web.UI.HtmlControls.HtmlForm", message);
+    }
+
     // Shared driver: stubs + minimal references, one Default.aspx (or .master if
     // the caller-supplied markup says so), optional web.config. Returns the
     // generated default_aspx.g.cs text. Eliminates the boilerplate around
