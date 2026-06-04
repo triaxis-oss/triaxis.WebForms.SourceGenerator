@@ -1,14 +1,6 @@
 <Project>
 
   <PropertyGroup>
-    <!-- Auto-collect the markup corpus into AdditionalFiles. Set to false
-         if the consumer project supplies its own AdditionalFiles list. -->
-    <WebFormsGenCollectMarkup Condition=" '$(WebFormsGenCollectMarkup)' == '' ">true</WebFormsGenCollectMarkup>
-    <!-- The markup file set the generator consumes and the .compiled
-         sidecar emitter writes for. Hoisted so both consumers stay in
-         lockstep; override to extend coverage. -->
-    <WebFormsGenMarkupInclude Condition=" '$(WebFormsGenMarkupInclude)' == '' ">**\*.aspx;**\*.ascx;**\*.master;Global.asax</WebFormsGenMarkupInclude>
-    <WebFormsGenMarkupExclude Condition=" '$(WebFormsGenMarkupExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</WebFormsGenMarkupExclude>
     <!-- At publish, replace each markup file with a zero-byte placeholder:
          BuildManager only probes for existence once .compiled sidecars put
          the app in non-updatable precompiled mode, so the deployment
@@ -50,13 +42,6 @@
     <CompilerVisibleProperty Include="MSBuildProjectDirectory" />
   </ItemGroup>
 
-  <ItemGroup Condition=" '$(WebFormsGenCollectMarkup)' == 'true' ">
-    <AdditionalFiles Include="$(WebFormsGenMarkupInclude)" Exclude="$(WebFormsGenMarkupExclude)" />
-    <!-- web.config <pages><controls> supplies site-wide tag-prefix → namespace
-         mappings the generator needs to resolve control types. -->
-    <AdditionalFiles Include="web.config" Condition=" Exists('web.config') " />
-  </ItemGroup>
-
   <!-- BuildManager only enters precompiled mode when PrecompiledApp.config
        sits at the web root (next to web.config). Without it, the .compiled
        sidecars below are ignored and aspx pages get JIT-compiled at request
@@ -65,7 +50,15 @@
        source control alongside web.config. -->
   <Target Name="_WebFormsGenCheckPrecompiledAppConfig" BeforeTargets="Build"
           Condition=" '$(WebFormsGenCheckPrecompiledAppConfig)' != 'false' AND !Exists('$(MSBuildProjectDirectory)\PrecompiledApp.config') ">
+    <!-- Only nag when the project actually has markup that would emit
+         .compiled sidecars — a library that pulls the package only for
+         its content / publish pipeline (e.g. an .asmx-only service)
+         needs no PrecompiledApp.config. -->
+    <ItemGroup>
+      <_WebFormsGenAnyMarkup Include="$(WebFormsGenMarkupInclude)" Exclude="$(WebFormsGenMarkupExclude)" />
+    </ItemGroup>
     <Error Code="TWF001"
+           Condition=" '@(_WebFormsGenAnyMarkup)' != '' "
            Text="PrecompiledApp.config is missing from the project root. The WebForms source generator requires it next to web.config so BuildManager enters precompiled mode. Create PrecompiledApp.config with this single line and commit it: &lt;precompiledApp version=&quot;2&quot; updatable=&quot;false&quot; /&gt;  Override with -p:WebFormsGenCheckPrecompiledAppConfig=false." />
   </Target>
 

@@ -1,0 +1,83 @@
+<Project>
+
+  <!-- Land build output directly in bin\ (not bin\<Config>\<TFM>\) so the
+       dev project root matches the IIS deployment layout: <App>.dll and
+       the .compiled sidecars sit where BuildManager probes, and a local
+       IIS pointed at the project root serves the app without an
+       additional copy step. Conditional defaults — a consumer that
+       explicitly sets OutputPath / AppendTargetFrameworkToOutputPath /
+       AppendRuntimeIdentifierToOutputPath wins. -->
+  <PropertyGroup>
+    <OutputPath Condition=" '$(OutputPath)' == '' ">bin\</OutputPath>
+    <AppendTargetFrameworkToOutputPath Condition=" '$(AppendTargetFrameworkToOutputPath)' == '' ">false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath Condition=" '$(AppendRuntimeIdentifierToOutputPath)' == '' ">false</AppendRuntimeIdentifierToOutputPath>
+    <!-- The generator emits `#nullable disable` / `#nullable enable`
+         directives, which require C# 8+; net48's SDK default is C# 7.3,
+         so a consumer that hasn't picked a LangVersion would otherwise
+         see CS8370 on every generated file. Pinned to a specific
+         version instead of `latest` so a newer SDK can't silently move
+         consumers to a different language feature set. Conditional so
+         an explicit setting wins. -->
+    <LangVersion Condition=" '$(LangVersion)' == '' ">14</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Master switch for the package's default item contributions —
+         markup AdditionalFiles for the generator, web.config
+         AdditionalFiles, and the Content glob the SDK publishes.
+         Mirrors EnableDefaultCompileItems / EnableDefaultContentItems
+         from the SDK: cascades from $(EnableDefaultItems) so disabling
+         SDK defaults disables ours too; per-package opt-out without
+         touching the SDK switch via EnableDefaultWebFormsGenItems=false. -->
+    <EnableDefaultWebFormsGenItems Condition=" '$(EnableDefaultWebFormsGenItems)' == '' ">$(EnableDefaultItems)</EnableDefaultWebFormsGenItems>
+    <!-- The markup file set the generator consumes and the .compiled
+         sidecar emitter writes for. Hoisted so both consumers stay in
+         lockstep; override to extend coverage.
+         Global.asax must be expressed as a glob (`**\Global.asax`), not
+         as the literal `Global.asax` — a literal Include adds the item
+         even when the file is absent, which then surfaces to the
+         generator as an AdditionalText with null content and produces
+         a broken `_global_asax : System.Web.HttpApplication` in
+         projects that have no Global.asax (e.g. an .asmx-only library
+         that doesn't reference System.Web). The recursive `**\` is
+         required for MSBuild to treat the entry as a glob at all. -->
+    <WebFormsGenMarkupInclude Condition=" '$(WebFormsGenMarkupInclude)' == '' ">**\*.aspx;**\*.ascx;**\*.master;**\Global.asax</WebFormsGenMarkupInclude>
+    <WebFormsGenMarkupExclude Condition=" '$(WebFormsGenMarkupExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</WebFormsGenMarkupExclude>
+    <!-- Full glob patterns added to Content for publish. One property,
+         not a separate "extensions" knob, because every transform
+         shape MSBuild offers (item-list transform with separator,
+         string `.Replace`, target-time batching) either escapes the
+         resulting semicolons so substitution doesn't re-split, or
+         pushes the Content addition past the consumer's csproj body
+         where `<Content Remove="..." />` can no longer see the items.
+         A literal property keeps both the extension default and the
+         `Content Remove` extension story working. Override to replace
+         the list, or append (`$(WebFormsGenContentInclude);**\*.pdf`)
+         to extend. -->
+    <WebFormsGenContentInclude Condition=" '$(WebFormsGenContentInclude)' == '' ">**\web.config;**\PrecompiledApp.config;App_Themes\**\*;**\*.ashx;**\*.asmx;**\*.svc;**\*.css;**\*.js;**\*.htc;**\*.map;**\*.browser;**\*.skin;**\*.tdf;**\*.txt;**\*.gif;**\*.png;**\*.jpg;**\*.jpeg;**\*.svg;**\*.ico;**\*.eot;**\*.ttf;**\*.woff;**\*.woff2</WebFormsGenContentInclude>
+    <WebFormsGenContentExclude Condition=" '$(WebFormsGenContentExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**;node_modules\**;**\*.intellisense.js</WebFormsGenContentExclude>
+  </PropertyGroup>
+
+  <!-- The item additions live in .props (not .targets) so they're in
+       scope when the consumer's csproj body evaluates — that's the
+       only ordering under which `<Content Remove="App_Data\**" />` in
+       the consumer body can see and drop entries the package added.
+       Items added from .targets land *after* the body, leaving body-
+       level Remove / Update silently no-op against them. -->
+  <ItemGroup Condition=" '$(EnableDefaultWebFormsGenItems)' != 'false' ">
+    <!-- Markup the generator processes (one ASP.<name>_aspx page type
+         per file) AND publishes — published files are stripped to zero
+         bytes post-publish but must be present for BuildManager to
+         probe. CopyToPublishDirectory only; they must not pollute the
+         dev OutputPath, where BuildManager would then try to probe them. -->
+    <AdditionalFiles Include="$(WebFormsGenMarkupInclude)" Exclude="$(WebFormsGenMarkupExclude)" />
+    <Content Include="$(WebFormsGenMarkupInclude)" Exclude="$(WebFormsGenMarkupExclude)"
+             CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
+    <!-- web.config <pages><controls> supplies site-wide tag-prefix → namespace
+         mappings the generator needs to resolve control types. -->
+    <AdditionalFiles Include="web.config" Condition=" Exists('web.config') " />
+    <Content Include="$(WebFormsGenContentInclude)" Exclude="$(WebFormsGenContentExclude)"
+             CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

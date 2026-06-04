@@ -38,16 +38,75 @@ doing it. Use at your own risk; report issues here, not to Microsoft.
 dotnet add package triaxis.WebForms.SourceGenerator
 ```
 
-The package ships only an analyzer DLL (`analyzers/dotnet/cs/`) and a
-`buildTransitive` targets file. There is no runtime library — the generated
-page types are compiled directly into your assembly.
+The package ships the analyzer DLL (`analyzers/dotnet/cs/`), an MSBuild
+task assembly (`tasks/netstandard2.0/`), and `buildTransitive` `.props` /
+`.targets`. There is no runtime library — the generated page types are
+compiled directly into your assembly.
+
+A typical WebForms app csproj boils down to:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="triaxis.WebForms.SourceGenerator" />
+  </ItemGroup>
+</Project>
+```
+
+The package fills in the rest: output layout, content collection, page
+compilation, publish layout, web.config transforms.
 
 ## What the package does at build time
 
-When referenced, the bundled `buildTransitive` targets:
+When referenced, the bundled `buildTransitive` `.props` / `.targets`:
 
-- Glob `**/*.aspx`, `**/*.ascx`, `**/*.master`, `Global.asax`, and `web.config`
-  into `AdditionalFiles` (opt out with `<WebFormsGenCollectMarkup>false</WebFormsGenCollectMarkup>`).
+- Default `OutputPath` to `bin\` and disable the
+  `bin\<Configuration>\<TargetFramework>\` appends, so build output
+  lands in the same `bin\` directory IIS probes. A consumer that
+  explicitly sets `OutputPath` / `AppendTargetFrameworkToOutputPath`
+  wins.
+- Glob the WebForms content corpus into `Content` so the SDK publish
+  pipeline ships it. `WebFormsGenContentInclude` holds the default
+  globs — markup, `web.config` (root + per-folder overrides),
+  `PrecompiledApp.config`, the `App_Themes\**` tree, the handlers
+  (`*.ashx` / `*.asmx` / `*.svc`), the standard script / style /
+  image / font extensions. App-specific configs (`NLog.config`,
+  `log4net.config`, …) are deliberately not in the default — pull
+  them in via `<Content Include="..." />`. `WebFormsGenContentExclude`
+  carries the standard build-folder excludes (`bin\**` / `obj\**` /
+  `node_modules\**` / `**\*.intellisense.js`).
+
+  The package's item additions live in its `.props` (loaded BEFORE
+  the consumer csproj body), so standard MSBuild `Content Remove` /
+  `Include` / `Update` in the consumer body work against them:
+  ```xml
+  <ItemGroup>
+    <Content Remove="App_Data\**;Logs\**;Uploads\**" />
+    <Content Include="NLog.config;Docs\**\*.pdf" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  ```
+  Or extend the package's property defaults:
+  ```xml
+  <PropertyGroup>
+    <WebFormsGenContentInclude>$(WebFormsGenContentInclude);**\*.pdf;**\*.docx</WebFormsGenContentInclude>
+    <WebFormsGenContentExclude>$(WebFormsGenContentExclude);Logs\**</WebFormsGenContentExclude>
+  </PropertyGroup>
+  ```
+- Glob the markup corpus (`*.aspx` / `*.ascx` / `*.master` /
+  `Global.asax`) and `web.config` into `AdditionalFiles` for the
+  generator.
+
+All default item contributions above (Content + AdditionalFiles) ride
+the single `EnableDefaultWebFormsGenItems` switch, which mirrors the
+SDK's `EnableDefaultItems` / `EnableDefaultContentItems` pattern: it
+cascades from `$(EnableDefaultItems)` (so flipping the SDK switch
+disables the package's defaults too), and the consumer can opt out
+just the package's contribution with
+`<EnableDefaultWebFormsGenItems>false</EnableDefaultWebFormsGenItems>`
+to take over `Content` and `AdditionalFiles` itself.
 - Verify before `Build` that `PrecompiledApp.config` exists at the project
   root next to `web.config`. Without it `BuildManager` never enters
   precompiled mode and the generated pages are ignored at runtime — so the
