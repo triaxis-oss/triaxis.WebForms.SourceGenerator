@@ -34,6 +34,8 @@
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
+#nullable disable
+
 using System;
 using System.Collections;
 using System.IO;

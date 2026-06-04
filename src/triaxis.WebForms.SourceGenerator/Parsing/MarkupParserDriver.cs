@@ -70,7 +70,7 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                     return;
                 }
 
-                if (directive == null && TryDirectiveKind(id, out MarkupKind kind))
+                if (directive == null && attributes != null && TryDirectiveKind(id, out MarkupKind kind))
                 {
                     directive = BuildDirective(kind, attributes);
                 }

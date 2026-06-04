@@ -8,6 +8,8 @@
 // Exception subclass preserves the error-recovery behavior. Defining these
 // here keeps the vendored files byte-faithful to upstream for easy re-sync.
 
+#nullable disable
+
 using System;
 using System.Globalization;
 
