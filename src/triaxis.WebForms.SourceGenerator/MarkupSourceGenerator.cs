@@ -91,25 +91,57 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
             spc.AddSource("ApplicationBrowserCapabilitiesFactory.g.cs", SourceText.From(source, Encoding.UTF8));
         });
 
-        // Group every App_Themes\<theme>\*.css file into one ThemeEntry per
-        // theme folder. The path → theme-name extraction lets us discover
-        // themes without an extra MSBuild-side property; the file's own
-        // location declares which theme it belongs to.
-        IncrementalValuesProvider<Model.ThemeEntry> themeEntries = context.AdditionalTextsProvider
+        // App_Themes\<theme>\*.css → (theme, ~/App_Themes/<theme>/<file>.css).
+        // The file's location declares its theme; no MSBuild-side prop needed.
+        IncrementalValueProvider<ImmutableArray<(string Theme, string LinkedStylesheet)>> themeCss = context.AdditionalTextsProvider
             .Where(static text => string.Equals(Path.GetExtension(text.Path), ".css", StringComparison.OrdinalIgnoreCase))
             .Combine(context.AnalyzerConfigOptionsProvider)
             .Select(static (pair, _) => ExtractThemeStylesheet(pair.Left.Path, pair.Right))
             .Where(static t => t.HasValue)
             .Select(static (t, _) => t!.Value)
-            .Collect()
-            .SelectMany(static (perFile, _) => perFile
-                .GroupBy(t => t.Theme, StringComparer.Ordinal)
-                .Select(g => new Model.ThemeEntry(g.Key, g.Select(t => t.LinkedStylesheet)
-                    .OrderBy(s => s, StringComparer.Ordinal).ToImmutableArray())));
+            .Collect();
 
-        context.RegisterSourceOutput(themeEntries, static (spc, theme) =>
+        // App_Themes\<theme>\*.skin → (theme, virtualPath, content) — content
+        // is what SkinEmitter parses + compiles into ControlSkinDelegate
+        // methods.
+        IncrementalValueProvider<ImmutableArray<(string Theme, string VirtualPath, string Content)>> themeSkins = context.AdditionalTextsProvider
+            .Where(static text => string.Equals(Path.GetExtension(text.Path), ".skin", StringComparison.OrdinalIgnoreCase))
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (pair, ct) => ExtractThemeSkin(pair.Left, pair.Right, ct))
+            .Where(static t => t.HasValue)
+            .Select(static (t, _) => t!.Value)
+            .Collect();
+
+        IncrementalValuesProvider<Model.ThemeEntry> themeEntries = themeCss.Combine(themeSkins)
+            .SelectMany(static (pair, _) =>
+            {
+                (ImmutableArray<(string Theme, string LinkedStylesheet)> cssEntries,
+                    ImmutableArray<(string Theme, string VirtualPath, string Content)> skinEntries) = pair;
+                var cssByTheme = cssEntries.GroupBy(c => c.Theme, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.Select(c => c.LinkedStylesheet).OrderBy(s => s, StringComparer.Ordinal).ToImmutableArray(), StringComparer.Ordinal);
+                var skinByTheme = skinEntries.GroupBy(s => s.Theme, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.Select(s => (s.VirtualPath, s.Content)).OrderBy(s => s.VirtualPath, StringComparer.Ordinal).ToImmutableArray(), StringComparer.Ordinal);
+                var allThemes = new HashSet<string>(cssByTheme.Keys, StringComparer.Ordinal);
+                foreach (string s in skinByTheme.Keys) allThemes.Add(s);
+                return allThemes.OrderBy(t => t, StringComparer.Ordinal)
+                    .Select(name => new Model.ThemeEntry(
+                        name,
+                        cssByTheme.TryGetValue(name, out ImmutableArray<string> css) ? css : ImmutableArray<string>.Empty,
+                        skinByTheme.TryGetValue(name, out ImmutableArray<(string, string)> skins) ? skins : ImmutableArray<(string, string)>.Empty));
+            });
+
+        // Skin compilation needs web.config (for tag-prefix resolution) and
+        // the compilation (for control-type and property-element type
+        // resolution). The codebehind doesn't matter — skin entries don't
+        // wire events or bind to fields.
+        context.RegisterSourceOutput(themeEntries.Combine(webConfig).Combine(context.CompilationProvider), static (spc, pair) =>
         {
-            string source = Emit.ThemeEmitter.Emit(theme);
+            (Model.ThemeEntry theme, WebConfigBindings cfg) = pair.Left;
+            Compilation compilation = pair.Right;
+            (ControlTypeResolver resolver, AttributeBinder binder, ChildClassifier classify,
+                IEnumerable<string> serverPrefixes, System.Func<string?, string, bool, (string?, bool)>? resolveChild)
+                = BuildSkinContext(compilation, cfg);
+            string source = Emit.ThemeEmitter.Emit(theme, resolver, binder, classify, compilation, serverPrefixes, resolveChild);
             spc.AddSource(theme.Name + ".g.cs", SourceText.From(source, Encoding.UTF8));
         });
 
@@ -189,6 +221,56 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         string theme = virtualPath.Substring(prefix.Length, themeEnd - prefix.Length);
         string fileName = virtualPath.Substring(virtualPath.LastIndexOf('/') + 1);
         return (theme, $"~/App_Themes/{theme}/{fileName}");
+    }
+
+    // Same path → theme-name extraction as ExtractThemeStylesheet, but for
+    // .skin files; the payload is the file content (the parser + emitter
+    // walk it later) rather than a URL.
+    private static (string Theme, string VirtualPath, string Content)? ExtractThemeSkin(
+        AdditionalText text, AnalyzerConfigOptionsProvider options, CancellationToken cancellationToken)
+    {
+        string virtualPath = ToVirtualPath(text.Path, options).TrimStart('/');
+        const string prefix = "App_Themes/";
+        if (!virtualPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        int themeEnd = virtualPath.IndexOf('/', prefix.Length);
+        if (themeEnd < 0)
+        {
+            return null;
+        }
+        string theme = virtualPath.Substring(prefix.Length, themeEnd - prefix.Length);
+        string content = text.GetText(cancellationToken)?.ToString() ?? string.Empty;
+        return (theme, "/" + virtualPath, content);
+    }
+
+    // Skin compilation reuses the same control-resolver / attribute-binder /
+    // child-classifier the page emitter uses, just without the codebehind
+    // hook-up (skin entries don't wire events or bind to fields).
+    private static (ControlTypeResolver Resolver, AttributeBinder Binder, ChildClassifier Classify,
+        IEnumerable<string> ServerPrefixes, System.Func<string?, string, bool, (string?, bool)>? ResolveChild)
+        BuildSkinContext(Compilation compilation, WebConfigBindings cfg)
+    {
+        (ImmutableDictionary<string, string> mergedPrefixes,
+            ImmutableArray<string> _,
+            ImmutableDictionary<string, string> _,
+            ImmutableDictionary<string, string> mergedUserControls) = cfg;
+        var resolver = new ControlTypeResolver(mergedPrefixes,
+            metadata => compilation.GetTypeByMetadataName(metadata)?.ToDisplayString(),
+            mergedUserControls);
+        AttributeBinder binder = (metadata, name, value, container) =>
+            BindAttribute(compilation, codeBehind: null, metadata, name, value, container, layer3Fallbacks: null);
+        ChildClassifier classify = (parentMeta, childLocal, childIsServer) =>
+            ClassifyChild(compilation, parentMeta, childLocal, childIsServer);
+        var serverPrefixes = new HashSet<string>(mergedPrefixes.Keys, StringComparer.OrdinalIgnoreCase);
+        foreach (string key in mergedUserControls.Keys)
+        {
+            serverPrefixes.Add(key.Substring(0, key.IndexOf(':')));
+        }
+        System.Func<string?, string, bool, (string?, bool)> resolveChild =
+            (parentMeta, rawName, isServer) => ResolveChild(compilation, resolver, parentMeta, rawName, isServer);
+        return (resolver, binder, classify, serverPrefixes, resolveChild);
     }
 
     private static void EmitGlobalAsax(SourceProductionContext context, string content)

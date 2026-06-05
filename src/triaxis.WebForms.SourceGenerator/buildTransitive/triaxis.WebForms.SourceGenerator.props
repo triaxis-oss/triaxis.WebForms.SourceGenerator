@@ -84,6 +84,10 @@
          declares both the theme it belongs to (the folder name) and an
          entry in that theme's LinkedStyleSheets[] array. -->
     <AdditionalFiles Include="App_Themes\**\*.css" />
+    <!-- App_Themes\<name>\*.skin gets parsed + compiled into per-skin
+         ControlSkinDelegate methods registered in the theme's
+         __controlSkins dictionary. -->
+    <AdditionalFiles Include="App_Themes\**\*.skin" />
     <Content Include="$(WebFormsGenContentInclude)" Exclude="$(WebFormsGenContentExclude)"
              CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
