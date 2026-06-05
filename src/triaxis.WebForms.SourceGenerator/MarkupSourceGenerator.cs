@@ -157,7 +157,24 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         using (w.Block("namespace ASP"))
         using (w.Block($"public class _global_asax : {baseType}"))
         {
-            w.Line("public _global_asax() { }");
+            // Mirrors aspnet_compiler's _global_asax body: the __initialized
+            // static is the framework's one-shot guard for application-scope
+            // initialisation, and the Profile accessor exposes the typed
+            // DefaultProfile so HttpApplication-scoped code can read it
+            // without casting Context.Profile each time. The HttpApplication
+            // cast in the accessor preserves the precompiled oracle's shape
+            // (Context inherits from HttpApplication, so the cast is
+            // tautological — but the cast is what aspnet_compiler emits).
+            w.Line("private static bool __initialized;");
+            w.Blank();
+            w.Line("protected global::System.Web.Profile.DefaultProfile Profile => (global::System.Web.Profile.DefaultProfile)((global::System.Web.HttpApplication)this).Context.Profile;");
+            w.Blank();
+            w.Line("[global::System.Diagnostics.DebuggerNonUserCode]");
+            using (w.Block("public _global_asax()"))
+            using (w.Block("if (!__initialized)"))
+            {
+                w.Line("__initialized = true;");
+            }
         }
 
         context.AddSource("_global_asax.g.cs", SourceText.From(w.ToSource(), Encoding.UTF8));
