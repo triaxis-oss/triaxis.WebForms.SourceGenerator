@@ -848,6 +848,43 @@ public class GeneratorDriverTests
     }
 
     [Fact]
+    public void Nullable_property_resolves_through_underlying_type_converter()
+    {
+        // A Nullable<T> typed control property (e.g. `DateTime?`) used to
+        // fall through every layer of BuildValueExpression and land on
+        // the IAttributeAccessor.SetAttribute fallback — the value
+        // parsed at render time as a string expando, the typed property
+        // stayed null at runtime, and validators that gated on the
+        // typed value silently rejected the page. The fix: unwrap to T
+        // at the top of BuildValueExpression so Layer 1's TypeConverter
+        // pathway emits the construction recipe (and C#'s implicit
+        // T → T? handles the assignment to the Nullable<T> property).
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Demo { public class DatePicker : System.Web.UI.Control { public System.DateTime? Selected { get; set; } } }\n";
+        string text = RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\">" +
+            "<my:DatePicker runat=\"server\" ID=\"dp\" Selected=\"1/1/2000\" />" +
+            "</form>\r\n",
+            webConfig: "<configuration><system.web><pages><controls><add tagPrefix=\"my\" namespace=\"Demo\" /></controls></pages></system.web></configuration>");
+
+        // DateTime's TypeConverter resolves "1/1/2000" through the
+        // InstanceDescriptor pathway to `new System.DateTime(2000, 1, 1)`.
+        // Implicit DateTime → DateTime? lifts the assignment.
+        // DateTime's TypeConverter resolves "1/1/2000" through the
+        // InstanceDescriptor pathway to a `new System.DateTime(2000, 1, 1, …)`
+        // (the converter picks the most informative ctor overload — date
+        // plus zero time-of-day parts — but the prefix is what proves
+        // we landed in Layer 1 and not the SetAttribute fallback).
+        // Implicit DateTime → DateTime? lifts the assignment.
+        Assert.Contains("__ctrl.Selected = new global::System.DateTime(2000, 1, 1", text);
+        Assert.DoesNotContain("SetAttribute(\"Selected\"", text);
+    }
+
+    [Fact]
     public void Link_outside_server_head_maps_to_HtmlGenericControl()
     {
         // aspnet_compiler maps <link runat="server"> to HtmlLink only when

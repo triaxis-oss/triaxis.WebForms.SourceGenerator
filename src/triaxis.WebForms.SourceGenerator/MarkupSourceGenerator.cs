@@ -598,6 +598,18 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
 
     private static string? BuildValueExpression(ITypeSymbol propertyType, string value, Compilation compilation, ICollection<string>? layer3Fallbacks)
     {
+        // Nullable<T>: convert the markup value through T's converter (via
+        // Layer 1's invariant-culture pathway) and let C#'s implicit
+        // T → T? lift it. Without this, every Nullable<T> property fell
+        // through to the IAttributeAccessor.SetAttribute fallback — the
+        // value parsed at render time as a string expando, the typed
+        // property stayed null at runtime, and validators that gated on
+        // the typed value rejected the page.
+        if (propertyType is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
+        {
+            return BuildValueExpression(nullable.TypeArguments[0], value, compilation, layer3Fallbacks);
+        }
+
         if (propertyType.TypeKind == TypeKind.Enum)
         {
             // A flags enum attribute is a comma-separated list ("Move, Resize");
