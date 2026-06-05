@@ -943,7 +943,7 @@ public class GeneratorDriverTests
         // The codebehind declares Style, so the field assignment is a
         // separate line after construction (chained only for
         // generator-declared fields).
-        Assert.Contains("global::System.Web.UI.HtmlControls.HtmlLink __ctrl = (__activator != null) ? (global::System.Web.UI.HtmlControls.HtmlLink)global::System.Web.HttpRuntime.WebObjectActivator.GetService(typeof(global::System.Web.UI.HtmlControls.HtmlLink)) : new global::System.Web.UI.HtmlControls.HtmlLink()", text);
+        Assert.Contains("global::System.Web.UI.HtmlControls.HtmlLink __ctrl = (__activator != null) ? (global::System.Web.UI.HtmlControls.HtmlLink)__activator.GetService(typeof(global::System.Web.UI.HtmlControls.HtmlLink)) : new global::System.Web.UI.HtmlControls.HtmlLink()", text);
         Assert.Contains("this.Style = __ctrl;", text);
     }
 

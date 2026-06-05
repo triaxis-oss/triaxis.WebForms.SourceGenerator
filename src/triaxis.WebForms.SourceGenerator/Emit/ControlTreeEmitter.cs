@@ -711,7 +711,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 // of the static in the non-null branch both mirror exactly
                 // what aspnet_compiler emits — the resulting IL decompiles
                 // identically against the precompiled oracle.
-                m.Line($"{rc.TypeName} __ctrl = {fieldAssign}(__activator != null) ? ({rc.TypeName})global::System.Web.HttpRuntime.WebObjectActivator.GetService(typeof({rc.TypeName})) : new {rc.TypeName}();");
+                m.Line($"{rc.TypeName} __ctrl = {fieldAssign}(__activator != null) ? ({rc.TypeName})__activator.GetService(typeof({rc.TypeName})) : new {rc.TypeName}();");
             }
             else
             {
