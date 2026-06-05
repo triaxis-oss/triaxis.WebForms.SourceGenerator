@@ -235,7 +235,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 {
                     if (child is ServerControlNode control)
                     {
-                        EmitChild(control, parentVar, parentMetadata, controlContainer: false, w, templateBody);
+                        EmitChild(control, parentVar, parserLocal: null, parentMetadata, controlContainer: false, w, templateBody);
                     }
                 }
 
@@ -270,6 +270,13 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             // becomes one LiteralControl (no binding) or DataBoundLiteralControl.
             // Some builders (HtmlHead) discard whitespace-only literal runs.
             bool discardWhitespace = DiscardsWhitespaceLiterals(parentMetadata);
+            // Hoist the IParserAccessor cast into a local once per block —
+            // aspnet_compiler does this so a method that adds N parsed
+            // sub-objects emits N `localN.AddParsedSubObject(...)` calls
+            // against a single cast instead of N inline casts. Use the local
+            // only when something downstream will actually call into it; an
+            // empty container would otherwise see an unused-local warning.
+            string? parserLocal = TryEmitParserLocal(children, parentVar, parentMetadata, w, controlContainer: true, discardWhitespace);
             var run = new List<(bool IsDataBind, string Text)>();
             foreach (MarkupNode child in children)
             {
@@ -290,17 +297,38 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         run.Add((true, bind.Code.Replace("Bind(", "Eval(")));
                         break;
                     case ServerControlNode control:
-                        FlushRun(run, parentVar, w, discardWhitespace);
-                        EmitChild(control, parentVar, parentMetadata, controlContainer: true, w, templateBody);
+                        FlushRun(run, parentVar, parserLocal, w, discardWhitespace);
+                        EmitChild(control, parentVar, parserLocal, parentMetadata, controlContainer: true, w, templateBody);
                         break;
                     case CodeRenderNode code:
-                        FlushRun(run, parentVar, w, discardWhitespace);
+                        FlushRun(run, parentVar, parserLocal, w, discardWhitespace);
                         _diagnostics.Add($"code-render ({code.Kind}) in content not yet emitted: {Truncate(code.Code)}");
                         break;
                 }
             }
 
-            FlushRun(run, parentVar, w, discardWhitespace);
+            FlushRun(run, parentVar, parserLocal, w, discardWhitespace);
+        }
+
+        private string? TryEmitParserLocal(IReadOnlyList<MarkupNode> children, string parentVar, string parentMetadata, IndentedTextWriter w, bool controlContainer, bool discardWhitespace)
+        {
+            // Server controls in a control container route through
+            // AddParsedSubObject; a literal run does too unless every literal
+            // is whitespace and the parent discards whitespace.
+            bool any = false;
+            foreach (MarkupNode child in children)
+            {
+                if (child is ServerControlNode) { any = true; break; }
+                if (child is LiteralNode lit && !(discardWhitespace && string.IsNullOrWhiteSpace(lit.Text))) { any = true; break; }
+                if (child is CodeRenderNode { Kind: CodeRenderKind.DataBinding }) { any = true; break; }
+            }
+            if (!any)
+            {
+                return null;
+            }
+            string name = UniqueName("__parser");
+            w.Line($"{ParserAccessor} {name} = ({ParserAccessor}){parentVar};");
+            return name;
         }
 
         // HtmlHeadBuilder.AllowWhitespaceLiterals() is false: whitespace-only
@@ -310,7 +338,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             return WebFormsContract.DiscardsWhitespaceLiterals(parentMetadata);
         }
 
-        private void FlushRun(List<(bool IsDataBind, string Text)> run, string parentVar, IndentedTextWriter w, bool discardWhitespace)
+        private void FlushRun(List<(bool IsDataBind, string Text)> run, string parentVar, string? parserLocal, IndentedTextWriter w, bool discardWhitespace)
         {
             if (run.Count == 0)
             {
@@ -321,7 +349,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             bool containerOk = !run.Exists(s => s.IsDataBind && s.Text.Contains("Container")) || _containerType != null;
             if (hasDataBind && containerOk)
             {
-                EmitDataBoundLiteralControl(run, parentVar, w);
+                EmitDataBoundLiteralControl(run, parentVar, parserLocal, w);
             }
             else
             {
@@ -338,14 +366,20 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 string literal = text.ToString();
                 if (literal.Length > 0 && !(discardWhitespace && string.IsNullOrWhiteSpace(literal)))
                 {
-                    w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject(new {LiteralControl}({Literal(literal)}));");
+                    w.Line($"{ParserCall(parentVar, parserLocal)}.AddParsedSubObject(new {LiteralControl}({Literal(literal)}));");
                 }
             }
 
             run.Clear();
         }
 
-        private void EmitDataBoundLiteralControl(List<(bool IsDataBind, string Text)> run, string parentVar, IndentedTextWriter w)
+        // Builds the LHS of an `AddParsedSubObject` call: the hoisted local
+        // when EmitChildren allocated one for this block, the inline cast
+        // when it didn't.
+        private static string ParserCall(string parentVar, string? parserLocal)
+            => parserLocal ?? $"(({ParserAccessor}){parentVar})";
+
+        private void EmitDataBoundLiteralControl(List<(bool IsDataBind, string Text)> run, string parentVar, string? parserLocal, IndentedTextWriter w)
         {
             // Interleave into statics (count = databinds + 1) and databinds, the
             // shape DataBoundLiteralControl renders: static[0] db[0] static[1] …
@@ -370,7 +404,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
             string build = UniqueName("__BuildControl_dblc");
             string handler = "__DataBind" + build;
-            w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({build}());");
+            w.Line($"{ParserCall(parentVar, parserLocal)}.AddParsedSubObject({build}());");
 
             IndentedTextWriter b = CodeWriter.Create(MemberIndent);
             b.Line(PageFrameEmitter.DebuggerNonUserCode);
@@ -405,7 +439,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             _methods.Append(b.ToSource());
         }
 
-        private void EmitChild(ServerControlNode control, string parentVar, string parentMetadata, bool controlContainer, IndentedTextWriter w, bool templateBody = false)
+        private void EmitChild(ServerControlNode control, string parentVar, string? parserLocal, string parentMetadata, bool controlContainer, IndentedTextWriter w, bool templateBody = false)
         {
             // <script runat="server"> injects its code as members of the page type.
             if (control.IsServerControl && string.Equals(control.TagName, "script", StringComparison.OrdinalIgnoreCase))
@@ -447,14 +481,14 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     if (built is { } b)
                     {
                         w.Line($"{b.TypeName} {b.LocalName} = {b.Method}();");
-                        w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({b.LocalName});");
+                        w.Line($"{ParserCall(parentVar, parserLocal)}.AddParsedSubObject({b.LocalName});");
                     }
                     else if (controlContainer)
                     {
                         string verbatim = Verbatim(control);
                         if (verbatim.Length > 0)
                         {
-                            w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject(new {LiteralControl}({Literal(verbatim)}));");
+                            w.Line($"{ParserCall(parentVar, parserLocal)}.AddParsedSubObject(new {LiteralControl}({Literal(verbatim)}));");
                         }
                     }
                     break;
@@ -1004,6 +1038,16 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             IndentedTextWriter render = CodeWriter.Create(BodyIndent);
             var run = new List<(bool IsDataBind, string Text)>();
             int ordinal = 0;
+            // Hoist the IParserAccessor cast for this method's AddParsedSubObject
+            // calls — emit when there's at least one segment that turns into one
+            // (a captured control or, if the region data-binds, any literal run).
+            bool needsParser = segments.Exists(s => s.Kind == 'C' || (hasDataBind && (s.Kind == 'L' || s.Kind == '#')));
+            string? parserLocal = null;
+            if (needsParser)
+            {
+                parserLocal = UniqueName("__parser");
+                w.Line($"{ParserAccessor} {parserLocal} = ({ParserAccessor}){parentVar};");
+            }
 
             void FlushRun()
             {
@@ -1014,7 +1058,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
                 if (run.Exists(x => x.IsDataBind))
                 {
-                    EmitDataBoundLiteralControl(run, parentVar, w);
+                    EmitDataBoundLiteralControl(run, parentVar, parserLocal, w);
                     render.Line($"parameterContainer.Controls[{ordinal++}].RenderControl(__w);");
                 }
                 else
@@ -1022,7 +1066,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     string text = string.Concat(run.ConvertAll(x => x.Text));
                     if (text.Length > 0)
                     {
-                        w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject(new {LiteralControl}({Literal(text)}));");
+                        w.Line($"{ParserCall(parentVar, parserLocal)}.AddParsedSubObject(new {LiteralControl}({Literal(text)}));");
                         render.Line($"parameterContainer.Controls[{ordinal++}].RenderControl(__w);");
                     }
                 }
@@ -1049,7 +1093,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         if (built is { } b)
                         {
                             w.Line($"{b.TypeName} {b.LocalName} = {b.Method}();");
-                            w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({b.LocalName});");
+                            w.Line($"{ParserCall(parentVar, parserLocal)}.AddParsedSubObject({b.LocalName});");
                             render.Line($"parameterContainer.Controls[{ordinal++}].RenderControl(__w);");
                         }
                         break;
