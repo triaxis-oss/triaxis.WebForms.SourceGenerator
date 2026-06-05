@@ -91,6 +91,28 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
             spc.AddSource("ApplicationBrowserCapabilitiesFactory.g.cs", SourceText.From(source, Encoding.UTF8));
         });
 
+        // Group every App_Themes\<theme>\*.css file into one ThemeEntry per
+        // theme folder. The path → theme-name extraction lets us discover
+        // themes without an extra MSBuild-side property; the file's own
+        // location declares which theme it belongs to.
+        IncrementalValuesProvider<Model.ThemeEntry> themeEntries = context.AdditionalTextsProvider
+            .Where(static text => string.Equals(Path.GetExtension(text.Path), ".css", StringComparison.OrdinalIgnoreCase))
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (pair, _) => ExtractThemeStylesheet(pair.Left.Path, pair.Right))
+            .Where(static t => t.HasValue)
+            .Select(static (t, _) => t!.Value)
+            .Collect()
+            .SelectMany(static (perFile, _) => perFile
+                .GroupBy(t => t.Theme, StringComparer.Ordinal)
+                .Select(g => new Model.ThemeEntry(g.Key, g.Select(t => t.LinkedStylesheet)
+                    .OrderBy(s => s, StringComparer.Ordinal).ToImmutableArray())));
+
+        context.RegisterSourceOutput(themeEntries, static (spc, theme) =>
+        {
+            string source = Emit.ThemeEmitter.Emit(theme);
+            spc.AddSource(theme.Name + ".g.cs", SourceText.From(source, Encoding.UTF8));
+        });
+
         // Combine returns nested (Left, Right) tuples; project them once into
         // a named PageInput so downstream code reads by name instead of
         // decoding .Left.Left.Right.Left chains.
@@ -144,6 +166,29 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         }
 
         return "/" + normalized.TrimStart('/');
+    }
+
+    // Detects whether a .css file path points into App_Themes\<name>\ and,
+    // if so, returns the theme name plus the runtime-relative
+    // ~/App_Themes/<name>/<file>.css URL that goes into LinkedStyleSheets.
+    // Files outside any theme folder (App_Themes\foo.css at the root, or
+    // .css files not under App_Themes at all) return null.
+    private static (string Theme, string LinkedStylesheet)? ExtractThemeStylesheet(string filePath, AnalyzerConfigOptionsProvider options)
+    {
+        string virtualPath = ToVirtualPath(filePath, options).TrimStart('/');
+        const string prefix = "App_Themes/";
+        if (!virtualPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        int themeEnd = virtualPath.IndexOf('/', prefix.Length);
+        if (themeEnd < 0)
+        {
+            return null;
+        }
+        string theme = virtualPath.Substring(prefix.Length, themeEnd - prefix.Length);
+        string fileName = virtualPath.Substring(virtualPath.LastIndexOf('/') + 1);
+        return (theme, $"~/App_Themes/{theme}/{fileName}");
     }
 
     private static void EmitGlobalAsax(SourceProductionContext context, string content)

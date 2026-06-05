@@ -80,6 +80,10 @@
          (one ASP.ApplicationBrowserCapabilitiesFactory aggregated from all
          the files). -->
     <AdditionalFiles Include="App_Browsers\**\*.browser" />
+    <!-- App_Themes\<name>\*.css feeds the theme-shell emitter; each .css
+         declares both the theme it belongs to (the folder name) and an
+         entry in that theme's LinkedStyleSheets[] array. -->
+    <AdditionalFiles Include="App_Themes\**\*.css" />
     <Content Include="$(WebFormsGenContentInclude)" Exclude="$(WebFormsGenContentExclude)"
              CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
