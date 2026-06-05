@@ -170,7 +170,7 @@ public class GeneratorDriverTests
         string text = result.GeneratedTrees.Single(t => t.FilePath.EndsWith("default_aspx.g.cs")).GetText().ToString();
 
         Assert.Contains("SetRenderMethodDelegate", text);
-        Assert.Contains("AddParsedSubObject(__BuildControllbl());", text);
+        Assert.Contains("AddParsedSubObject(lbl);", text);
         Assert.Contains("__w.Write(Now());", text);
         Assert.Contains("parameterContainer.Controls[0].RenderControl(__w);", text);
         // The in-region literal is written inline, not built as a LiteralControl.
@@ -416,7 +416,7 @@ public class GeneratorDriverTests
         // initialized, then added to the form.
         Assert.Contains("new global::ASP.controls_ctlwidget_ascx()", text);
         Assert.Contains("InitializeAsUserControl(this.Page)", text);
-        Assert.Contains("AddParsedSubObject(__BuildControlw())", text);
+        Assert.Contains("AddParsedSubObject(w);", text);
     }
 
     [Fact]
@@ -911,11 +911,12 @@ public class GeneratorDriverTests
             "</form>\r\n");
 
         // Outside <head>, <link> falls through to HtmlGenericControl with
-        // the tag name as the constructor argument.
+        // the tag name as the constructor argument. Style is declared on
+        // the codebehind, so the field assignment is a separate line
+        // (chained only when the generator declares the field itself).
         Assert.Contains("new global::System.Web.UI.HtmlControls.HtmlGenericControl(\"link\")", text);
-        Assert.DoesNotContain("new global::System.Web.UI.HtmlControls.HtmlLink", text);
-        // Codebehind field assignment present — the runtime NRE root cause.
         Assert.Contains("this.Style = __ctrl;", text);
+        Assert.DoesNotContain("new global::System.Web.UI.HtmlControls.HtmlLink", text);
     }
 
     [Fact]
@@ -935,7 +936,14 @@ public class GeneratorDriverTests
             "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
             "<head runat=\"server\"><link runat=\"server\" id=\"Style\" /></head>\r\n");
 
-        Assert.Contains("new global::System.Web.UI.HtmlControls.HtmlLink()", text);
+        // HtmlLink is a Control so it goes through the activator-aware
+        // path. Positive-branch-first ternary (activator != null →
+        // GetService, else new T) and the re-read of the static in the
+        // non-null branch both match aspnet_compiler's emitted shape.
+        // The codebehind declares Style, so the field assignment is a
+        // separate line after construction (chained only for
+        // generator-declared fields).
+        Assert.Contains("global::System.Web.UI.HtmlControls.HtmlLink __ctrl = (__activator != null) ? (global::System.Web.UI.HtmlControls.HtmlLink)global::System.Web.HttpRuntime.WebObjectActivator.GetService(typeof(global::System.Web.UI.HtmlControls.HtmlLink)) : new global::System.Web.UI.HtmlControls.HtmlLink()", text);
         Assert.Contains("this.Style = __ctrl;", text);
     }
 

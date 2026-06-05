@@ -89,7 +89,7 @@ public class EmitterTests
         Assert.Contains("__ctrl.ID = \"lbl\";", source);
         Assert.Contains("__ctrl.Text = \"hi\";", source);
         // The form is built and attached to the page in __BuildControlTree.
-        Assert.Contains("AddParsedSubObject(__BuildControlform1());", source);
+        Assert.Contains("AddParsedSubObject(form1);", source);
     }
 
     [Theory]

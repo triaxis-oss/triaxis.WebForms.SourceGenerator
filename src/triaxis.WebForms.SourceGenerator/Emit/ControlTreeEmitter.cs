@@ -55,7 +55,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         // One list per enclosing two-way template; controls inside record their
         // Bind() targets so the template's ExtractValues method can read them back.
         private readonly Stack<List<ExtractBinding>> _extractCollectors = new Stack<List<ExtractBinding>>();
-        private int _autoControl;
+        // Auto-control counter for tags without an explicit ID. Initialised
+        // at 1 so the first emitted name is `__control2` — that's where
+        // aspnet_compiler's numbering also starts (it reserves __control1
+        // for the page-level frame's implicit identity).
+        private int _autoControl = 1;
         private string? _containerType;
         private bool _inTemplate;
 
@@ -439,10 +443,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             {
                 case ChildPlacementKind.ParsedSubObject:
                 {
-                    string? method = EmitControl(control, parentMetadata, templateBody);
-                    if (method != null)
+                    EmittedControl? built = EmitControl(control, parentMetadata, templateBody);
+                    if (built is { } b)
                     {
-                        w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({method}());");
+                        w.Line($"{b.TypeName} {b.LocalName} = {b.Method}();");
+                        w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({b.LocalName});");
                     }
                     else if (controlContainer)
                     {
@@ -457,10 +462,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
                 case ChildPlacementKind.CollectionItem:
                 {
-                    string? method = EmitControl(control, parentMetadata, templateBody);
-                    if (method != null)
+                    EmittedControl? built = EmitControl(control, parentMetadata, templateBody);
+                    if (built is { } b)
                     {
-                        w.Line($"{parentVar}.{placement.Member}.Add({method}());");
+                        w.Line($"{b.TypeName} {b.LocalName} = {b.Method}();");
+                        w.Line($"{parentVar}.{placement.Member}.Add({b.LocalName});");
                     }
                     break;
                 }
@@ -471,10 +477,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     {
                         if (grandChild is ServerControlNode item)
                         {
-                            string? method = EmitControl(item, parentMetadata);
-                            if (method != null)
+                            EmittedControl? built = EmitControl(item, parentMetadata);
+                            if (built is { } b)
                             {
-                                w.Line($"{parentVar}.{placement.Member}.Add({method}());");
+                                w.Line($"{b.TypeName} {b.LocalName} = {b.Method}();");
+                                w.Line($"{parentVar}.{placement.Member}.Add({b.LocalName});");
                             }
                         }
                     }
@@ -683,8 +690,16 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 "System.Web.UI.HtmlControls.HtmlTableCell",
             };
 
-        private void EmitInstantiation(IndentedTextWriter m, ResolvedControl rc, bool promoted)
+        // Construction line, with the optional codebehind-field assignment
+        // FUSED into the same expression via chained assignment
+        // (T __ctrl = this.<field> = ...;). aspnet_compiler emits this
+        // shape so the field is populated atomically with construction —
+        // any property setter, framework call, or event wiring that runs
+        // later in the method sees a populated field even before the
+        // build method returns.
+        private void EmitInstantiation(IndentedTextWriter m, ResolvedControl rc, bool promoted, string? boundField)
         {
+            string fieldAssign = boundField is null ? string.Empty : $"this.{boundField} = ";
             // A user control's generated ASP type isn't in this compilation, so
             // _isControl can't see it — but it is always a UserControl.
             if (string.IsNullOrEmpty(rc.ConstructorArgument)
@@ -692,18 +707,30 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 && (rc.IsUserControl || _isControl(rc.MetadataName)))
             {
                 m.Line("global::System.IServiceProvider __activator = global::System.Web.HttpRuntime.WebObjectActivator;");
-                // The else branch re-reads the static property (not the local) — the
-                // shape the ASP.NET compiler emits, so the activator construction
-                // decompiles identically to the precompiled oracle.
-                m.Line($"{rc.TypeName} __ctrl = (__activator == null) ? new {rc.TypeName}() : ({rc.TypeName})global::System.Web.HttpRuntime.WebObjectActivator.GetService(typeof({rc.TypeName}));");
+                // Ternary direction (positive-then-default) and the re-read
+                // of the static in the non-null branch both mirror exactly
+                // what aspnet_compiler emits — the resulting IL decompiles
+                // identically against the precompiled oracle.
+                m.Line($"{rc.TypeName} __ctrl = {fieldAssign}(__activator != null) ? ({rc.TypeName})global::System.Web.HttpRuntime.WebObjectActivator.GetService(typeof({rc.TypeName})) : new {rc.TypeName}();");
             }
             else
             {
-                m.Line($"{rc.TypeName} __ctrl = new {rc.TypeName}({rc.ConstructorArgument});");
+                m.Line($"{rc.TypeName} __ctrl = {fieldAssign}new {rc.TypeName}({rc.ConstructorArgument});");
             }
         }
 
-        private string? EmitControl(ServerControlNode node, string parentMetadata, bool directTemplateChild = false)
+        // Returned to the caller so the parent can emit:
+        //   <TypeName> <LocalName> = <Method>();
+        //   parent.AddParsedSubObject(<LocalName>);
+        // The field assignment lives INSIDE the build method, fused into
+        // the construction line via chained assignment
+        // (T __ctrl = this.<field> = new T(...);), so the field is
+        // populated before any property setter, framework call, or event
+        // wiring can fire inside the method — no call-site touch needed.
+        // Null when the control didn't resolve.
+        private readonly record struct EmittedControl(string Method, string TypeName, string LocalName);
+
+        private EmittedControl? EmitControl(ServerControlNode node, string parentMetadata, bool directTemplateChild = false)
         {
             // <input>'s concrete HtmlInputControl type depends on its type attribute.
             string? inputType = null;
@@ -732,11 +759,68 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             string suffix = MethodSuffix(node);
             string method = "__BuildControl" + suffix;
 
+            // Resolve the codebehind field binding BEFORE the instantiation
+            // so EmitInstantiation can fuse `this.<field> = ` into the
+            // construction expression via chained assignment when it's
+            // safe to do so. The chained shape (T __ctrl = this.<f> = …;)
+            // only compiles when the field's declared type is exactly the
+            // resolved control type — for a user-control field declared
+            // as the codebehind base type, the chained `this.<f> = …`
+            // expression evaluates to the base type and assigning that
+            // back into the derived T local fails. So: chain only when
+            // we declare the field ourselves with rc.TypeName; otherwise
+            // emit a separate `this.<f> = __ctrl;` line after the
+            // construction (the field type is whatever the codebehind
+            // declared, an implicit upcast handles it).
+            string? boundField = null;
+            bool chainableFieldAssignment = false;
+            if (node.Id != null && !_inTemplate)
+            {
+                (string? field, string? conflictingType) = _resolveCodeBehindField(node.Id, rc.MetadataName);
+                if (field != null)
+                {
+                    boundField = field;
+                }
+                else if (rc.IsUserControl && _codeBehindHasMember(node.Id))
+                {
+                    // The user control's field can't be type-checked here (its
+                    // generated type isn't in this compilation), but it derives
+                    // from the codebehind field's type, so the assignment is
+                    // validated when the consumer assembly compiles.
+                    boundField = Sanitize(node.Id);
+                }
+                else if (conflictingType != null)
+                {
+                    // Field exists but the resolved control type isn't
+                    // assignable to it. The framework would silently drop the
+                    // assignment, leaving the field null at runtime (NRE on
+                    // first access). Surface as TWF003 so the build fails
+                    // with a fixable diagnostic instead of going green and
+                    // crashing in the browser.
+                    _fieldBindingMismatches.Add(new FieldBindingMismatch(node.Id, rc.MetadataName, conflictingType));
+                }
+                else
+                {
+                    string decl = Sanitize(node.Id);
+                    if (_declaredFields.Add(decl))
+                    {
+                        _methods.AppendLine($"        protected {rc.TypeName} {decl};");
+                    }
+
+                    boundField = decl;
+                    chainableFieldAssignment = true;
+                }
+            }
+
             IndentedTextWriter m = CodeWriter.Create(MemberIndent);
             m.Line(PageFrameEmitter.DebuggerNonUserCode);
             using (m.Block($"private {rc.TypeName} {method}()"))
             {
-                EmitInstantiation(m, rc, node.Promoted);
+                EmitInstantiation(m, rc, node.Promoted, chainableFieldAssignment ? boundField : null);
+                if (boundField != null && !chainableFieldAssignment)
+                {
+                    m.Line($"this.{boundField} = __ctrl;");
+                }
 
                 // A user control must be initialized (FrameworkInitialize wired) right
                 // after construction so its own control tree is built.
@@ -765,48 +849,6 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 if (node.Id != null)
                 {
                     m.Line($"__ctrl.ID = {Literal(node.Id)};");
-
-                    // Field assignment is page-scope only. Controls inside a template
-                    // are instantiated per data item and reached via FindControl, so
-                    // aspnet does not bind them to a single page field.
-                    if (!_inTemplate)
-                    {
-                        // Assign the codebehind's control field (this.cmdLogin = __ctrl;);
-                        // for inline pages with no codebehind field, declare one.
-                        (string? field, string? conflictingType) = _resolveCodeBehindField(node.Id, rc.MetadataName);
-                        if (field != null)
-                        {
-                            m.Line($"this.{field} = __ctrl;");
-                        }
-                        else if (rc.IsUserControl && _codeBehindHasMember(node.Id))
-                        {
-                            // The user control's field can't be type-checked here (its
-                            // generated type isn't in this compilation), but it derives
-                            // from the codebehind field's type, so the assignment is
-                            // validated when the consumer assembly compiles.
-                            m.Line($"this.{Sanitize(node.Id)} = __ctrl;");
-                        }
-                        else if (conflictingType != null)
-                        {
-                            // Field exists but the resolved control type isn't
-                            // assignable to it. The framework would silently drop the
-                            // assignment, leaving the field null at runtime (NRE on
-                            // first access). Surface as TWF003 so the build fails
-                            // with a fixable diagnostic instead of going green and
-                            // crashing in the browser.
-                            _fieldBindingMismatches.Add(new FieldBindingMismatch(node.Id, rc.MetadataName, conflictingType));
-                        }
-                        else
-                        {
-                            string decl = Sanitize(node.Id);
-                            if (_declaredFields.Add(decl))
-                            {
-                                _methods.AppendLine($"        protected {rc.TypeName} {decl};");
-                            }
-
-                            m.Line($"this.{decl} = __ctrl;");
-                        }
-                    }
                 }
 
                 EmitAttributes(node, rc, suffix, m);
@@ -825,7 +867,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
             m.Blank();
             _methods.Append(m.ToSource());
-            return method;
+            return new EmittedControl(method, rc.TypeName, suffix);
         }
 
         // A user control's own type isn't in this compilation; bind its attributes
@@ -1003,10 +1045,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         break;
                     case 'C':
                         FlushRun();
-                        string? method = EmitControl(control!, parentMetadata);
-                        if (method != null)
+                        EmittedControl? built = EmitControl(control!, parentMetadata);
+                        if (built is { } b)
                         {
-                            w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({method}());");
+                            w.Line($"{b.TypeName} {b.LocalName} = {b.Method}();");
+                            w.Line($"(({ParserAccessor}){parentVar}).AddParsedSubObject({b.LocalName});");
                             render.Line($"parameterContainer.Controls[{ordinal++}].RenderControl(__w);");
                         }
                         break;
