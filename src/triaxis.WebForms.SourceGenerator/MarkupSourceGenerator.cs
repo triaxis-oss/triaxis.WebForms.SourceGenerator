@@ -73,6 +73,24 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(files.Collect(), static (spc, all) => EmitManifest(spc, all));
 
+        // Aggregate every App_Browsers\*.browser file into a single
+        // ApplicationBrowserCapabilitiesFactory emission. Each .browser
+        // contributes a flat list of entries; the emitter folds them into
+        // the parent / refining tree.
+        IncrementalValueProvider<ImmutableArray<Model.BrowserEntry>> browserEntries = context.AdditionalTextsProvider
+            .Where(static text => string.Equals(Path.GetExtension(text.Path), ".browser", StringComparison.OrdinalIgnoreCase))
+            .Select(static (text, ct) => Parsing.BrowserCapabilitiesParser.Parse(text.GetText(ct)?.ToString() ?? string.Empty, text.Path))
+            .Collect()
+            .Select(static (perFile, _) => perFile.SelectMany(e => e).ToImmutableArray());
+
+        context.RegisterSourceOutput(browserEntries.Combine(context.CompilationProvider), static (spc, pair) =>
+        {
+            (ImmutableArray<Model.BrowserEntry> entries, Compilation compilation) = pair;
+            if (entries.Length == 0) return;
+            string source = Emit.BrowserCapabilitiesFactoryEmitter.Emit(entries, compilation);
+            spc.AddSource("ApplicationBrowserCapabilitiesFactory.g.cs", SourceText.From(source, Encoding.UTF8));
+        });
+
         // Combine returns nested (Left, Right) tuples; project them once into
         // a named PageInput so downstream code reads by name instead of
         // decoding .Left.Left.Right.Left chains.

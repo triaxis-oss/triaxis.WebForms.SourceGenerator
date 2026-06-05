@@ -76,6 +76,10 @@
     <!-- web.config <pages><controls> supplies site-wide tag-prefix → namespace
          mappings the generator needs to resolve control types. -->
     <AdditionalFiles Include="web.config" Condition=" Exists('web.config') " />
+    <!-- App_Browsers\*.browser feeds the BrowserCapabilitiesFactory emitter
+         (one ASP.ApplicationBrowserCapabilitiesFactory aggregated from all
+         the files). -->
+    <AdditionalFiles Include="App_Browsers\**\*.browser" />
     <Content Include="$(WebFormsGenContentInclude)" Exclude="$(WebFormsGenContentExclude)"
              CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

@@ -27,6 +27,13 @@ namespace triaxis.WebForms.MSBuildTasks
         [Required] public string OutputDir { get; set; } = string.Empty;
         [Required] public string AssemblyName { get; set; } = string.Empty;
         [Required] public ITaskItem[] MarkupFiles { get; set; } = Array.Empty<ITaskItem>();
+        // App_Browsers\*.browser inputs. When non-empty, emit a single
+        // App_Browsers.compiled sidecar pointing BuildManager at the
+        // source-generated ASP.ApplicationBrowserCapabilitiesFactory so the
+        // runtime resolves it at app start; without this file the factory
+        // class is present but never wired and .browser entries silently
+        // don't apply.
+        public ITaskItem[] BrowserFiles { get; set; } = Array.Empty<ITaskItem>();
 
         public override bool Execute()
         {
@@ -59,6 +66,19 @@ namespace triaxis.WebForms.MSBuildTasks
                 // ("App_global.asax"), not the page cache-key hash.
                 string fileName = isGlobalAsax ? "App_global.asax.compiled" : PreservationFileName(vpath);
                 File.WriteAllText(Path.Combine(OutputDir, fileName), content);
+                count++;
+            }
+
+            if (BrowserFiles.Length > 0)
+            {
+                // resultType="9" = BuildResultType.AppBrowserCapabilitiesCompiler.
+                // BuildManager looks the sidecar up by the fixed name
+                // App_Browsers.compiled at app start.
+                string content =
+                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+                    "<preserve resultType=\"9\" virtualPath=\"/App_Browsers\" assembly=\"" +
+                    AssemblyName + "\" type=\"ASP.ApplicationBrowserCapabilitiesFactory\" />\r\n";
+                File.WriteAllText(Path.Combine(OutputDir, "App_Browsers.compiled"), content);
                 count++;
             }
 
