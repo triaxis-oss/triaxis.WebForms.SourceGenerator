@@ -115,6 +115,15 @@ to take over `Content` and `AdditionalFiles` itself.
 - After `Build`, emit a lean `.compiled` stub per markup file into
   `$(OutDir)` pointing `BuildManager` at the Roslyn-generated
   `ASP.<name>_aspx` type.
+- Emit a `.compiled` stub per handler (`.asmx` / `.ashx` / `.svc`) too.
+  These aren't source-generated — the directive names a prebuilt type —
+  but a non-updatable precompiled app still rejects any virtual path
+  without a sidecar ("has not been pre-compiled, and cannot be
+  requested"). `.asmx` / `.ashx` bind straight to the directive's
+  `Class` (`resultType=2`), resolved to the assembly that defines it by
+  reading the build outputs; a WCF `.svc` emits the `Service` directive's
+  `resultType=5` custom string carrying the deployed assembly closure the
+  host resolves the service type against.
 
 ## What the package does at publish time
 
@@ -142,11 +151,14 @@ that already maintain an equivalent step can opt out cleanly:
     <WebFormsGenAdditionalBinaries>WinSCP.exe;NativeHelper.dll</WebFormsGenAdditionalBinaries>
   </PropertyGroup>
   ```
-- **Zero out the published markup files.** Each `.aspx` / `.ascx` /
-  `.master` in `$(PublishDir)` is truncated to zero bytes. The page
-  type already lives in the host assembly and the `.compiled` sidecar
-  routes `BuildManager` to it, so the file only needs to exist for the
-  runtime probe — its content can leave the deployment. Opt out:
+- **Zero out the published markup and handler files.** Each `.aspx` /
+  `.ascx` / `.master` and each `.asmx` / `.ashx` / `.svc` in
+  `$(PublishDir)` is truncated to zero bytes. The page/handler type
+  already lives in (or is referenced by) the app and the `.compiled`
+  sidecar routes `BuildManager` / the WCF host to it, so the file only
+  needs to exist for the runtime probe — its content (and the internal
+  type names a handler directive would otherwise expose) can leave the
+  deployment. Opt out:
   `<WebFormsGenStripPublishedMarkup>false</WebFormsGenStripPublishedMarkup>`.
 - **XDT-transform `web.config`.** If `web.$(Configuration).config`
   (e.g. `web.Release.config`, `web.Debug.config`) exists at the project

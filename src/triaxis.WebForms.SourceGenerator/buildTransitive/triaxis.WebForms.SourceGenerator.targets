@@ -1,10 +1,12 @@
 <Project>
 
   <PropertyGroup>
-    <!-- At publish, replace each markup file with a zero-byte placeholder:
-         BuildManager only probes for existence once .compiled sidecars put
-         the app in non-updatable precompiled mode, so the deployment
-         doesn't need the source. Opt out with
+    <!-- At publish, replace each markup and handler file with a zero-byte
+         placeholder: BuildManager only probes for existence once .compiled
+         sidecars put the app in non-updatable precompiled mode, so the
+         deployment needs neither the markup source nor the handler
+         directives (which would otherwise leak internal type names already
+         carried, where needed, in the sidecars). Opt out with
          WebFormsGenStripPublishedMarkup=false. -->
     <WebFormsGenStripPublishedMarkup Condition=" '$(WebFormsGenStripPublishedMarkup)' == '' ">true</WebFormsGenStripPublishedMarkup>
     <!-- Path-prefix the .compiled sidecars are added to ResolvedFileToPublish
@@ -102,13 +104,22 @@
       <!-- App_Browsers\*.browser drives the App_Browsers.compiled sidecar;
            passing an empty list when none exist suppresses the sidecar. -->
       <_WebFormsGenBrowserForCompiled Include="App_Browsers\**\*.browser" />
+      <!-- .asmx/.ashx/.svc handlers each need a sidecar binding their virtual
+           path to the prebuilt type named in the directive; the task resolves
+           which built assembly holds that type (and, for .svc, the deployed
+           closure) by reading the output dir. -->
+      <_WebFormsGenHandlerForCompiled Include="$(WebFormsGenHandlerInclude)"
+                                 Exclude="$(WebFormsGenHandlerExclude)" />
+      <_WebFormsGenOutputAssemblies Include="$(OutDir)*.dll" />
     </ItemGroup>
     <triaxis.WebForms.MSBuildTasks.GenerateWebFormsCompiledFiles
         ProjectDir="$(MSBuildProjectDirectory)"
         OutputDir="$(OutDir)"
         AssemblyName="$(AssemblyName)"
         MarkupFiles="@(_WebFormsGenMarkupForCompiled)"
-        BrowserFiles="@(_WebFormsGenBrowserForCompiled)" />
+        BrowserFiles="@(_WebFormsGenBrowserForCompiled)"
+        HandlerFiles="@(_WebFormsGenHandlerForCompiled)"
+        ReferenceAssemblies="@(_WebFormsGenOutputAssemblies)" />
   </Target>
 
   <!-- The .compiled stubs above sit in $(OutDir) but aren't part of any
@@ -162,14 +173,16 @@
     </ItemGroup>
   </Target>
 
-  <!-- After Publish, zero out each published markup file. The page type is
-       already compiled into the assembly; BuildManager just needs the file
-       to exist. Empty placeholders keep the deployment small and the
-       source out of the artifact. -->
+  <!-- After Publish, zero out each published markup and handler file. The
+       page/handler type is already compiled into (or referenced by) the
+       app; BuildManager and the WCF host resolve it from the .compiled
+       sidecar and just need the file to exist. Empty placeholders keep the
+       deployment small and keep both markup source and the handler
+       directives' internal type names out of the artifact. -->
   <Target Name="_WebFormsGenStripPublishedMarkup" AfterTargets="Publish"
           Condition=" '$(WebFormsGenStripPublishedMarkup)' == 'true' ">
     <ItemGroup>
-      <_WebFormsGenPublishedMarkup Include="$(PublishDir)**\*.aspx;$(PublishDir)**\*.ascx;$(PublishDir)**\*.master" />
+      <_WebFormsGenPublishedMarkup Include="$(PublishDir)**\*.aspx;$(PublishDir)**\*.ascx;$(PublishDir)**\*.master;$(PublishDir)**\*.asmx;$(PublishDir)**\*.ashx;$(PublishDir)**\*.svc" />
     </ItemGroup>
     <triaxis.WebForms.MSBuildTasks.StripMarkupFiles
         Files="@(_WebFormsGenPublishedMarkup)" />

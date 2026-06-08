@@ -14,6 +14,16 @@
     <!-- MSBuild already loads Microsoft.Build.Utilities.Core into its host;
          we just need the metadata reference, not a runtime ship. -->
     <PackageReference Include="Microsoft.Build.Utilities.Core" PrivateAssets="all" ExcludeAssets="runtime" />
+    <!-- Reading type/assembly metadata out of the build outputs binds a
+         handler to its prebuilt type's assembly. Provided at runtime by the
+         MSBuild host (the .NET shared framework / MSBuild bin), so reference
+         it metadata-only like the build utilities above. -->
+    <PackageReference Include="System.Reflection.Metadata" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="System.Collections.Immutable" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="triaxis.WebForms.SourceGenerator.Tests" />
   </ItemGroup>
 
 </Project>
