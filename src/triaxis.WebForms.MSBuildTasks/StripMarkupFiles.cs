@@ -7,11 +7,13 @@ namespace triaxis.WebForms.MSBuildTasks
 {
     /// <summary>
     /// Truncates each input file to zero bytes in place. Used at publish
-    /// time to shrink the deployed markup corpus: <c>BuildManager</c> only
-    /// checks for file existence once the <c>.compiled</c> sidecars place
-    /// the app in non-updatable precompiled mode, so the published
-    /// <c>.aspx</c> / <c>.ascx</c> / <c>.master</c> files can be empty —
-    /// keeping source out of the deployment artifact and shrinking it.
+    /// time to shrink the deployed corpus: <c>BuildManager</c> (and the WCF
+    /// host) only check for file existence once the <c>.compiled</c> sidecars
+    /// place the app in non-updatable precompiled mode, so the published
+    /// markup (<c>.aspx</c> / <c>.ascx</c> / <c>.master</c>) and handler
+    /// (<c>.asmx</c> / <c>.ashx</c> / <c>.svc</c>) files can be empty —
+    /// keeping source and internal type names out of the deployment artifact
+    /// and shrinking it.
     /// </summary>
     public sealed class StripMarkupFiles : Task
     {

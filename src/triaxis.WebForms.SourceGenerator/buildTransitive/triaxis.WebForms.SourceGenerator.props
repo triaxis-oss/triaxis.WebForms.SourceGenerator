@@ -43,6 +43,13 @@
          required for MSBuild to treat the entry as a glob at all. -->
     <WebFormsGenMarkupInclude Condition=" '$(WebFormsGenMarkupInclude)' == '' ">**\*.aspx;**\*.ascx;**\*.master;**\Global.asax</WebFormsGenMarkupInclude>
     <WebFormsGenMarkupExclude Condition=" '$(WebFormsGenMarkupExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</WebFormsGenMarkupExclude>
+    <!-- Handler files (.asmx/.ashx/.svc). Unlike markup these aren't source-
+         generated into page types — each directive names a prebuilt class and
+         the .compiled emitter binds the virtual path straight to it (result
+         type 2 for .asmx/.ashx, 5 for a WCF .svc). Consumed only by the
+         .compiled target; a property so a consumer can narrow or extend the set. -->
+    <WebFormsGenHandlerInclude Condition=" '$(WebFormsGenHandlerInclude)' == '' ">**\*.asmx;**\*.ashx;**\*.svc</WebFormsGenHandlerInclude>
+    <WebFormsGenHandlerExclude Condition=" '$(WebFormsGenHandlerExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</WebFormsGenHandlerExclude>
     <!-- Full glob patterns added to Content for publish. One property,
          not a separate "extensions" knob, because every transform
          shape MSBuild offers (item-list transform with separator,
