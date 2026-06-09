@@ -39,6 +39,18 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
         // a lifted island's own subtree, where promotion resumes normally.
         private readonly Stack<int> _tableLiteralDepthStack = new Stack<int>();
         private int _tableLiteralDepth;
+        // The element stack only carries server controls, so a literal open tag
+        // whose name matches the enclosing server control (a plain <div> inside
+        // <div runat="server">) leaves just the server element on the stack — its
+        // first close tag would otherwise be mistaken for the server element's
+        // end. This counts the open same-name literal tags so the server element
+        // closes only when the count returns to zero. Saved across nested server
+        // controls, each of which tracks its own same-name depth. Mirrors
+        // System.Web's TemplateParser, where BuilderStackEntry._repeatCount counts
+        // same-name literal opens (ASURT 50795) so MaybeTerminateControl ignores
+        // their close tags until the count is back to zero.
+        private readonly Stack<int> _sameNameLiteralDepthStack = new Stack<int>();
+        private int _sameNameLiteralDepth;
         private readonly List<string> _errors = new List<string>();
 
         private MarkupTreeFolder(string fileText, IEnumerable<string> serverPrefixes, Func<string?, string, bool, (string?, bool)> resolveChild)
@@ -142,6 +154,8 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                         // the region's depth is restored when the island closes.
                         _tableLiteralDepthStack.Push(_tableLiteralDepth);
                         _tableLiteralDepth = 0;
+                        _sameNameLiteralDepthStack.Push(_sameNameLiteralDepth);
+                        _sameNameLiteralDepth = 0;
                     }
                     else
                     {
@@ -149,6 +163,10 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                         if (IsTable(id))
                         {
                             _tableLiteralDepth++;
+                        }
+                        else if (_open.Count > 1 && string.Equals(_open.Peek().RawName, id, StringComparison.OrdinalIgnoreCase))
+                        {
+                            _sameNameLiteralDepth++;
                         }
                     }
 
@@ -193,12 +211,23 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                     }
                     else if (_open.Count > 1 && string.Equals(_open.Peek().RawName, id, StringComparison.OrdinalIgnoreCase))
                     {
-                        FlushLiteral();
-                        _literals.Pop();
-                        _propertyContainer.Pop();
-                        _typeStack.Pop();
-                        _open.Pop().SourceEnd = parser.EndPosition;
-                        _tableLiteralDepth = _tableLiteralDepthStack.Pop();
+                        // Balance nested same-name literal tags first; only the
+                        // close that returns the depth to zero ends the control.
+                        if (_sameNameLiteralDepth > 0)
+                        {
+                            _sameNameLiteralDepth--;
+                            AppendVerbatim(parser);
+                        }
+                        else
+                        {
+                            FlushLiteral();
+                            _literals.Pop();
+                            _propertyContainer.Pop();
+                            _typeStack.Pop();
+                            _open.Pop().SourceEnd = parser.EndPosition;
+                            _tableLiteralDepth = _tableLiteralDepthStack.Pop();
+                            _sameNameLiteralDepth = _sameNameLiteralDepthStack.Pop();
+                        }
                     }
                     else
                     {

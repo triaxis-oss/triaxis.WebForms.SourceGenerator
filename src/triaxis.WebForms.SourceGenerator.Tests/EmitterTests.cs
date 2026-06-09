@@ -92,6 +92,88 @@ public class EmitterTests
         Assert.Contains("AddParsedSubObject(form1);", source);
     }
 
+    // A server <div> whose subtree nests literal <div>s of the same name: the
+    // element stack carries only the server <div>, so a naive close-tag match
+    // would end it at the FIRST inner </div> and hoist the rest to the parent.
+    // The first interior server control flushes the literal buffer, making the
+    // premature close observable as mis-nested child controls.
+    [Fact]
+    public void Server_generic_control_keeps_same_name_nested_subtree()
+    {
+        const string page =
+            "<%@ Page Language=\"C#\" AutoEventWireup=\"false\" Inherits=\"System.Web.UI.Page\" %>\r\n" +
+            "<div id=\"outer\" runat=\"server\">\r\n" +
+            "    <div class=\"row\">\r\n" +
+            "        <div class=\"cellA\">\r\n" +
+            "            <asp:Label ID=\"lblA\" runat=\"server\" Text=\"A\" />\r\n" +
+            "        </div>\r\n" +
+            "        <div class=\"cellB\">\r\n" +
+            "            <asp:Label ID=\"lblB\" runat=\"server\" Text=\"B\" />\r\n" +
+            "        </div>\r\n" +
+            "    </div>\r\n" +
+            "</div>\r\n";
+
+        ServerControlNode root = MarkupTreeFolder.Fold("Default.aspx", page, serverPrefixes: null, out IReadOnlyList<string> errors);
+
+        Assert.Empty(errors);
+
+        // Exactly one server control hangs off the page, and nothing leaked out
+        // of it: both labels must be descendants of <div id="outer">, never
+        // siblings of it.
+        var serverChildren = root.Children.OfType<ServerControlNode>().ToList();
+        ServerControlNode outer = Assert.Single(serverChildren);
+        Assert.Equal("outer", outer.Id);
+
+        var labels = outer.Children.OfType<ServerControlNode>().Select(c => c.Id).ToList();
+        Assert.Equal(new[] { "lblA", "lblB" }, labels);
+
+        // No </div> was dropped: outer's literals open and close the same number
+        // of nested <div>s (its own tag is auto-rendered, so it is not present).
+        string literals = string.Concat(outer.Children.OfType<LiteralNode>().Select(l => l.Text));
+        Assert.Equal(
+            CountOccurrences(literals, "<div"),
+            CountOccurrences(literals, "</div>"));
+    }
+
+    // Variant: the interior server control is itself a container. The same-name
+    // literal nesting must balance so the inner control lands inside outer, and
+    // outer still closes at the LAST balancing </div>.
+    [Fact]
+    public void Server_generic_control_nests_interior_server_container()
+    {
+        const string page =
+            "<%@ Page Language=\"C#\" AutoEventWireup=\"false\" Inherits=\"System.Web.UI.Page\" %>\r\n" +
+            "<div id=\"outer\" runat=\"server\">\r\n" +
+            "    <div class=\"wrap\">\r\n" +
+            "        <asp:Panel ID=\"inner\" runat=\"server\">\r\n" +
+            "            <div class=\"deep\">x</div>\r\n" +
+            "        </asp:Panel>\r\n" +
+            "    </div>\r\n" +
+            "</div>\r\n";
+
+        ServerControlNode root = MarkupTreeFolder.Fold("Default.aspx", page, serverPrefixes: null, out IReadOnlyList<string> errors);
+
+        Assert.Empty(errors);
+
+        ServerControlNode outer = Assert.Single(root.Children.OfType<ServerControlNode>());
+        Assert.Equal("outer", outer.Id);
+        ServerControlNode inner = Assert.Single(outer.Children.OfType<ServerControlNode>());
+        Assert.Equal("inner", inner.Id);
+        // The literal <div class="deep"> stayed inside the Panel, not leaked up.
+        Assert.Contains(inner.Children.OfType<LiteralNode>(), l => l.Text.Contains("class=\"deep\""));
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        int count = 0;
+        for (int i = haystack.IndexOf(needle, System.StringComparison.Ordinal); i >= 0; i = haystack.IndexOf(needle, i + needle.Length, System.StringComparison.Ordinal))
+        {
+            count++;
+        }
+
+        return count;
+    }
+
     [Theory]
     [InlineData("asp", "Label", "global::System.Web.UI.WebControls.Label")]
     [InlineData(null, "head", "global::System.Web.UI.HtmlControls.HtmlHead")]
