@@ -91,18 +91,18 @@ public class GeneratorDriverTests
             "  public class Control { public string ID { get; set; } public void ApplyStyleSheetSkin(Page p) { } }\n" +
             "  public class Page : Control { public string Theme { get; set; } public bool EnableEventValidation { get; set; } public string Title { get; set; } public void InitializeCulture() { } } }\n" +
             "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
-            "namespace System.Web.UI.WebControls { public struct FontUnit { } }\n" +
+            "namespace System.Web.UI.WebControls { public struct FontUnit { } public struct Unit { } }\n" +
             "namespace System.Drawing { public struct Color { public static Color Red { get; } public static Color FromArgb(int r, int g, int b) { return default; } } }\n" +
             "namespace Demo {\n" +
             "  [System.Flags] public enum Behaviors { None = 0, Move = 1, Resize = 2 }\n" +
             "  public class FontInfo { public bool Bold { get; set; } public string[] Names { get; set; } public System.Web.UI.WebControls.FontUnit Size { get; set; } }\n" +
-            "  public class Widget : System.Web.UI.Control { public Behaviors Behaviors { get; set; } public System.Drawing.Color ForeColor { get; set; } public FontInfo Font { get; } } }\n";
+            "  public class Widget : System.Web.UI.Control { public Behaviors Behaviors { get; set; } public System.Drawing.Color ForeColor { get; set; } public System.Web.UI.WebControls.Unit Width { get; set; } public FontInfo Font { get; } } }\n";
         var compilation = CSharpCompilation.Create("test", new[] { CSharpSyntaxTree.ParseText(stubs) });
 
         const string markup =
             "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
             "<form id=\"f\" runat=\"server\"><my:Widget runat=\"server\" ID=\"w\" Behaviors=\"Move, Resize\" " +
-            "ForeColor=\"Red\" Font-Bold=\"true\" Font-Names=\"Arial\" Font-Size=\"8pt\" /></form>\r\n";
+            "ForeColor=\"Red\" Width=\"100\" Font-Bold=\"true\" Font-Names=\"Arial\" Font-Size=\"8\" /></form>\r\n";
         const string webConfig =
             "<configuration><system.web><pages theme=\"MyTheme\" enableEventValidation=\"false\">" +
             "<controls><add tagPrefix=\"my\" namespace=\"Demo\" /></controls></pages></system.web></configuration>";
@@ -135,6 +135,8 @@ public class GeneratorDriverTests
         Assert.Contains("__ctrl.ForeColor = global::System.Drawing.Color.Red;", text);
         Assert.Contains("__ctrl.Font.Bold = true;", text);
         Assert.Contains("__ctrl.Font.Names = new string[] { \"Arial\" };", text);
+        // A suffix-less Unit defaults to Pixel, but a suffix-less FontUnit defaults to Point.
+        Assert.Contains("__ctrl.Width = new global::System.Web.UI.WebControls.Unit(100.0, global::System.Web.UI.WebControls.UnitType.Pixel);", text);
         Assert.Contains("__ctrl.Font.Size = new global::System.Web.UI.WebControls.FontUnit(new global::System.Web.UI.WebControls.Unit(8.0, global::System.Web.UI.WebControls.UnitType.Point));", text);
         // None of the above should fall back to SetAttribute.
         Assert.DoesNotContain("SetAttribute", text);

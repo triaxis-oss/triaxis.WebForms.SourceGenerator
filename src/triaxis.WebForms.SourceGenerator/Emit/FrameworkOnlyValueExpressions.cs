@@ -45,11 +45,12 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             switch (propertyType.ToDisplayString())
             {
                 case "System.Web.UI.WebControls.Unit":
-                    return UnitExpression(value)
+                    return UnitExpression(value, "Pixel")
                         ?? $"global::System.Web.UI.WebControls.Unit.Parse({MarkupSourceGenerator.StringLiteral(value)})";
 
                 case "System.Web.UI.WebControls.FontUnit":
-                    return UnitExpression(value) is { } fu
+                    // FontUnit parses a suffix-less number as Point, not Pixel.
+                    return UnitExpression(value, "Point") is { } fu
                         ? $"new global::System.Web.UI.WebControls.FontUnit({fu})"
                         : $"global::System.Web.UI.WebControls.FontUnit.Parse({MarkupSourceGenerator.StringLiteral(value)})";
 
@@ -71,8 +72,10 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         // Mirrors Unit's parsing into the new Unit(value, UnitType) form the
         // ASP.NET compiler emits (rather than a runtime Unit.Parse). Returns
         // null for values that aren't a plain number + unit suffix (e.g.
-        // "Auto"), letting the caller fall back to Unit.Parse.
-        private static string? UnitExpression(string value)
+        // "Auto"), letting the caller fall back to Unit.Parse. defaultType is
+        // the UnitType for a suffix-less number, which differs by target:
+        // Pixel for Unit, Point for FontUnit.
+        private static string? UnitExpression(string value, string defaultType)
         {
             Match m = s_unitLiteral.Match(value.Trim());
             if (!m.Success)
@@ -88,7 +91,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
             string? unitType = m.Groups[2].Value.ToLowerInvariant() switch
             {
-                "" or "px" => "Pixel",
+                "" => defaultType,
+                "px" => "Pixel",
                 "pt" => "Point",
                 "pc" => "Pica",
                 "in" => "Inch",
