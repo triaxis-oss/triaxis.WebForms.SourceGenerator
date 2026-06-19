@@ -13,6 +13,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 using triaxis.WebForms.SourceGenerator.Emit;
@@ -444,7 +445,8 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
             out IReadOnlyList<Emit.ControlTreeEmitter.FieldBindingMismatch> fieldBindingMismatches,
             (id, controlMetadata) => ResolveCodeBehindField(compilation, codeBehind, id, controlMetadata),
             usings,
-            id => CodeBehindHasMember(codeBehind, id));
+            id => CodeBehindHasMember(codeBehind, id),
+            BuildConstructorForwarding(codeBehind));
 
         foreach (string typeName in layer3Fallbacks)
         {
@@ -622,6 +624,169 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
 
         return false;
     }
+
+    // Mirrors the ASP.NET compiler's constructor-injection support
+    // (TemplateControlCodeDomTreeGenerator.AddConstructorToSource): for each
+    // public parameterized constructor on the codebehind base, the generated
+    // type gets a matching constructor forwarding its arguments to base(...).
+    // Returns null when there's nothing to forward (no codebehind, or the base
+    // only has a parameterless ctor) so the emitter keeps its simple shape.
+    private static Emit.ConstructorForwarding? BuildConstructorForwarding(INamedTypeSymbol? codeBehind)
+    {
+        if (codeBehind is null)
+        {
+            return null;
+        }
+
+        var constructors = new List<Emit.ForwardedConstructor>();
+        bool baseHasParameterless = false;
+        foreach (IMethodSymbol ctor in codeBehind.InstanceConstructors)
+        {
+            // Public-only, matching Type.GetConstructors(BindingFlags.Public) /
+            // GetConstructor(Type.EmptyTypes) in the reference source.
+            if (ctor.DeclaredAccessibility != Accessibility.Public)
+            {
+                continue;
+            }
+
+            if (ctor.Parameters.Length == 0)
+            {
+                baseHasParameterless = true;
+                continue;
+            }
+
+            var parameters = new List<string>(ctor.Parameters.Length);
+            var arguments = new List<string>(ctor.Parameters.Length);
+            foreach (IParameterSymbol parameter in ctor.Parameters)
+            {
+                parameters.Add(RenderForwardedParameter(parameter));
+                arguments.Add(EscapeIdentifier(parameter.Name));
+            }
+
+            constructors.Add(new Emit.ForwardedConstructor(string.Join(", ", parameters), string.Join(", ", arguments)));
+        }
+
+        return constructors.Count == 0 ? null : new Emit.ConstructorForwarding(constructors, baseHasParameterless);
+    }
+
+    // "[attr] global::Type name = default" — the parameter as it appears on the
+    // forwarding ctor. Attributes are copied so DI metadata (e.g.
+    // [FromKeyedServices]) the container reads off the derived ctor survives.
+    private static string RenderForwardedParameter(IParameterSymbol parameter)
+    {
+        var sb = new StringBuilder();
+        foreach (AttributeData attribute in parameter.GetAttributes())
+        {
+            if (RenderAttribute(attribute) is { } rendered)
+            {
+                sb.Append(rendered).Append(' ');
+            }
+        }
+
+        sb.Append(parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+        sb.Append(' ');
+        sb.Append(EscapeIdentifier(parameter.Name));
+
+        // Emit the C# optional-parameter form rather than the compiler's
+        // [DefaultParameterValue]; both produce the same metadata default, and
+        // "= value" is the idiomatic shape for hand-emitted source.
+        if (parameter.HasExplicitDefaultValue)
+        {
+            sb.Append(" = ").Append(RenderDefaultValue(parameter));
+        }
+
+        return sb.ToString();
+    }
+
+    // Renders an attribute as "[global::Name(args)]", or null when any argument
+    // can't be reproduced as a literal — dropping the attribute beats emitting
+    // code that won't compile.
+    private static string? RenderAttribute(AttributeData attribute)
+    {
+        if (attribute.AttributeClass is null)
+        {
+            return null;
+        }
+
+        var args = new List<string>();
+        foreach (TypedConstant arg in attribute.ConstructorArguments)
+        {
+            if (RenderTypedConstant(arg) is not { } rendered)
+            {
+                return null;
+            }
+
+            args.Add(rendered);
+        }
+
+        foreach (KeyValuePair<string, TypedConstant> named in attribute.NamedArguments)
+        {
+            if (RenderTypedConstant(named.Value) is not { } rendered)
+            {
+                return null;
+            }
+
+            args.Add($"{named.Key} = {rendered}");
+        }
+
+        string name = attribute.AttributeClass.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        return args.Count == 0 ? $"[{name}]" : $"[{name}({string.Join(", ", args)})]";
+    }
+
+    private static string? RenderTypedConstant(TypedConstant constant)
+    {
+        if (constant.IsNull)
+        {
+            return "null";
+        }
+
+        switch (constant.Kind)
+        {
+            case TypedConstantKind.Primitive:
+                return FormatArgValue(constant.Value);
+            case TypedConstantKind.Enum:
+                return FormatArgValue(constant.Value) is { } underlying
+                    ? $"({constant.Type!.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}){underlying}"
+                    : null;
+            case TypedConstantKind.Type:
+                return constant.Value is ITypeSymbol type
+                    ? $"typeof({type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)})"
+                    : null;
+            case TypedConstantKind.Array:
+                var items = new List<string>(constant.Values.Length);
+                foreach (TypedConstant value in constant.Values)
+                {
+                    if (RenderTypedConstant(value) is not { } item)
+                    {
+                        return null;
+                    }
+
+                    items.Add(item);
+                }
+
+                string element = ((IArrayTypeSymbol)constant.Type!).ElementType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                return $"new {element}[] {{ {string.Join(", ", items)} }}";
+            default:
+                return null;
+        }
+    }
+
+    private static string RenderDefaultValue(IParameterSymbol parameter)
+    {
+        object? value = parameter.ExplicitDefaultValue;
+        if (value is null)
+        {
+            // Covers a null reference/nullable default and default(struct).
+            return "default";
+        }
+
+        return parameter.Type.TypeKind == TypeKind.Enum
+            ? $"({parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)}){FormatArgValue(value)}"
+            : FormatArgValue(value) ?? "default";
+    }
+
+    private static string EscapeIdentifier(string name)
+        => SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
 
     private static IEventSymbol? FindEvent(INamedTypeSymbol type, string name)
     {
