@@ -979,6 +979,91 @@ public class GeneratorDriverTests
         Assert.Contains("System.Web.UI.HtmlControls.HtmlForm", message);
     }
 
+    [Fact]
+    public void Codebehind_with_only_a_parameterized_ctor_forwards_to_base_and_drops_default_ctor()
+    {
+        // The codebehind has no parameterless ctor, only one taking services.
+        // The generated page must forward those arguments to base(...) — and must
+        // NOT emit a parameterless ctor (the base can't be default-constructed).
+        // Init logic moves into a shared __Init() invoked from the forwarding ctor.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } }\n" +
+            "  public class Page : Control { } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Foo { public interface IService { }\n" +
+            "  public class Bar : System.Web.UI.Page { public Bar(IService svc) { } } }\n";
+        string text = RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\"></form>\r\n");
+
+        Assert.Contains("public default_aspx(global::Foo.IService svc) : base(svc)", text);
+        Assert.Contains("private void __Init()", text);
+        // The init body moved into __Init; the only ctor is the forwarding one.
+        Assert.Contains("AppRelativeVirtualPath = \"~/Default.aspx\";", text);
+        Assert.DoesNotContain("public default_aspx()", text);
+    }
+
+    [Fact]
+    public void Codebehind_with_both_ctors_keeps_parameterless_and_forwards_the_other()
+    {
+        // The base exposes both a parameterless and a parameterized ctor: the
+        // generated page keeps a parameterless ctor (so it stays default-
+        // constructible) AND forwards the injected one — both running __Init().
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } }\n" +
+            "  public class Page : Control { } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Foo { public interface IService { }\n" +
+            "  public class Bar : System.Web.UI.Page { public Bar() { } public Bar(IService svc) { } } }\n";
+        string text = RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\"></form>\r\n");
+
+        Assert.Contains("public default_aspx()", text);
+        Assert.Contains("public default_aspx(global::Foo.IService svc) : base(svc)", text);
+        Assert.Contains("private void __Init()", text);
+        // Both ctors delegate to __Init rather than carrying init inline.
+        Assert.Equal(2, text.Split("__Init();").Length - 1);
+    }
+
+    [Fact]
+    public void Forwarded_ctor_copies_parameter_attributes_and_default_values()
+    {
+        // DI metadata lives on the constructor parameters; the container reads it
+        // off the derived (generated) ctor, so the attributes — and any optional
+        // defaults — must be reproduced on the forwarding ctor.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } }\n" +
+            "  public class Page : Control { } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Foo { public interface IService { }\n" +
+            "  public sealed class FromKeyedServicesAttribute : System.Attribute { public FromKeyedServicesAttribute(string key) { } }\n" +
+            "  public class Bar : System.Web.UI.Page { public Bar([FromKeyedServices(\"main\")] IService svc, int retries = 3) { } } }\n";
+        var references = new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) };
+        var compilation = CSharpCompilation.Create("test", new[] { CSharpSyntaxTree.ParseText(stubs) }, references);
+        var additionalTexts = new AdditionalText[]
+        {
+            new InMemoryAdditionalText("/proj/Default.aspx", "<%@ Page Inherits=\"Foo.Bar\" %>\r\n<form id=\"f\" runat=\"server\"></form>\r\n"),
+        };
+        var options = new TestOptionsProvider(new Dictionary<string, string>
+        {
+            ["build_property.MSBuildProjectDirectory"] = "/proj",
+        });
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: new[] { new MarkupSourceGenerator().AsSourceGenerator() },
+            additionalTexts: additionalTexts,
+            parseOptions: null,
+            optionsProvider: options);
+        string text = driver.RunGenerators(compilation).GetRunResult()
+            .GeneratedTrees.Single(t => t.FilePath.EndsWith("default_aspx.g.cs")).GetText().ToString();
+
+        Assert.Contains("public default_aspx([global::Foo.FromKeyedServicesAttribute(\"main\")] global::Foo.IService svc, int retries = 3) : base(svc, retries)", text);
+    }
+
     // Shared driver: stubs + minimal references, one Default.aspx (or .master if
     // the caller-supplied markup says so), optional web.config. Returns the
     // generated default_aspx.g.cs text. Eliminates the boilerplate around

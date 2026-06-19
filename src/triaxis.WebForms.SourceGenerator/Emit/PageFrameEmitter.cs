@@ -21,7 +21,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             string? extraMethods = null,
             IEnumerable<string>? usings = null,
             IEnumerable<string>? contentPlaceHolderIds = null,
-            bool requestValidationEnabled = true)
+            bool requestValidationEnabled = true,
+            ConstructorForwarding? forwarding = null)
         {
             bool isPage = directive.Kind == MarkupKind.Page;
             string typeName = GeneratedNaming.TypeNameFromVirtualPath(virtualPath);
@@ -66,7 +67,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     w.Line("protected global::ASP._global_asax ApplicationInstance => (global::ASP._global_asax)(object)this.Context.ApplicationInstance;");
                     w.Blank();
 
-                    EmitConstructor(w, typeName, appRelative, isPage, directive.Kind == MarkupKind.Master ? contentPlaceHolderIds : null);
+                    EmitConstructor(w, typeName, appRelative, isPage, directive.Kind == MarkupKind.Master ? contentPlaceHolderIds : null, forwarding);
 
                     if (!string.IsNullOrEmpty(extraMethods))
                     {
@@ -128,32 +129,77 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         // the writer supplies the indentation.
         public const string DebuggerNonUserCode = "[global::System.Diagnostics.DebuggerNonUserCode]";
 
-        private static void EmitConstructor(IndentedTextWriter w, string typeName, string appRelative, bool isPage, IEnumerable<string>? contentPlaceHolderIds)
+        private static void EmitConstructor(IndentedTextWriter w, string typeName, string appRelative, bool isPage, IEnumerable<string>? contentPlaceHolderIds, ConstructorForwarding? forwarding)
         {
-            w.Line(DebuggerNonUserCode);
-            using (w.Block($"public {typeName}()"))
+            // No injectable base constructor: the parameterless ctor carries the
+            // initialization inline, matching the pre-4.7.2 compiler shape.
+            if (forwarding == null)
             {
-                w.Line($"AppRelativeVirtualPath = {Literal(appRelative)};");
-                using (w.Block("if (!__initialized)"))
+                w.Line(DebuggerNonUserCode);
+                using (w.Block($"public {typeName}()"))
                 {
-                    if (isPage)
-                    {
-                        // GetWrappedFileDependencies is Page-only — never emit it on
-                        // a UserControl/MasterPage frame.
-                        w.Line($"__fileDependencies = GetWrappedFileDependencies(new string[] {{ {Literal(appRelative)} }});");
-                    }
-
-                    w.Line("__initialized = true;");
+                    EmitInitBody(w, appRelative, isPage, contentPlaceHolderIds);
                 }
 
-                // A master page registers each ContentPlaceHolder id so content pages
-                // can target them (ContentPlaceHolders is protected internal on MasterPage).
-                if (contentPlaceHolderIds != null)
+                return;
+            }
+
+            // The codebehind exposes parameterized constructor(s): forward each to
+            // base(...) so dependency-injected arguments flow through, and run the
+            // page's own initialization from a shared __Init(). The parameterless
+            // ctor is emitted only when the base still offers one — otherwise the
+            // generated class must not be default-constructible either.
+            if (forwarding.BaseHasParameterlessConstructor)
+            {
+                w.Line(DebuggerNonUserCode);
+                using (w.Block($"public {typeName}()"))
                 {
-                    foreach (string id in contentPlaceHolderIds)
-                    {
-                        w.Line($"this.ContentPlaceHolders.Add({Literal(id)});");
-                    }
+                    w.Line("__Init();");
+                }
+
+                w.Blank();
+            }
+
+            foreach (ForwardedConstructor ctor in forwarding.Constructors)
+            {
+                w.Line(DebuggerNonUserCode);
+                using (w.Block($"public {typeName}({ctor.ParameterList}) : base({ctor.BaseArguments})"))
+                {
+                    w.Line("__Init();");
+                }
+
+                w.Blank();
+            }
+
+            w.Line(DebuggerNonUserCode);
+            using (w.Block("private void __Init()"))
+            {
+                EmitInitBody(w, appRelative, isPage, contentPlaceHolderIds);
+            }
+        }
+
+        private static void EmitInitBody(IndentedTextWriter w, string appRelative, bool isPage, IEnumerable<string>? contentPlaceHolderIds)
+        {
+            w.Line($"AppRelativeVirtualPath = {Literal(appRelative)};");
+            using (w.Block("if (!__initialized)"))
+            {
+                if (isPage)
+                {
+                    // GetWrappedFileDependencies is Page-only — never emit it on
+                    // a UserControl/MasterPage frame.
+                    w.Line($"__fileDependencies = GetWrappedFileDependencies(new string[] {{ {Literal(appRelative)} }});");
+                }
+
+                w.Line("__initialized = true;");
+            }
+
+            // A master page registers each ContentPlaceHolder id so content pages
+            // can target them (ContentPlaceHolders is protected internal on MasterPage).
+            if (contentPlaceHolderIds != null)
+            {
+                foreach (string id in contentPlaceHolderIds)
+                {
+                    w.Line($"this.ContentPlaceHolders.Add({Literal(id)});");
                 }
             }
         }

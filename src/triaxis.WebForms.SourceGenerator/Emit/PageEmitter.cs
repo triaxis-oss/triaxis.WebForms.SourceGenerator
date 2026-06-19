@@ -24,7 +24,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             out IReadOnlyList<ControlTreeEmitter.FieldBindingMismatch> fieldBindingMismatches,
             System.Func<string, string, (string?, string?)>? codeBehindField = null,
             System.Collections.Generic.IEnumerable<string>? usings = null,
-            System.Func<string, bool>? codeBehindHasMember = null)
+            System.Func<string, bool>? codeBehindHasMember = null,
+            ConstructorForwarding? forwarding = null)
         {
             string pageType = string.IsNullOrWhiteSpace(directive.Inherits)
                 ? directive.Kind switch
@@ -55,7 +56,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 : null;
             bool requestValidationEnabled = !string.Equals(validateRequest, "false", System.StringComparison.OrdinalIgnoreCase);
 
-            return PageFrameEmitter.Emit(directive, virtualPath, result.TreeBody, result.Methods, usings, result.ContentPlaceHolderIds, requestValidationEnabled);
+            return PageFrameEmitter.Emit(directive, virtualPath, result.TreeBody, result.Methods, usings, result.ContentPlaceHolderIds, requestValidationEnabled, forwarding);
         }
     }
 }
