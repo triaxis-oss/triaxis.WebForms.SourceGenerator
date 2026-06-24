@@ -39,6 +39,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         //   (null, null)  → no such member; emitter declares one
         private readonly Func<string, string, (string? AssignableField, string? ConflictingType)> _resolveCodeBehindField;
         private readonly Func<string, bool> _codeBehindHasMember;
+        private readonly DefaultContentResolver _defaultContent;
         private readonly HashSet<string> _declaredFields = new HashSet<string>(StringComparer.Ordinal);
         private readonly ChildClassifier _classify;
         private readonly ControlContainerPredicate _isControlContainer;
@@ -76,7 +77,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             string themeTarget,
             IReadOnlyDictionary<string, string> pageDefaults,
             Func<string, string, (string?, string?)>? resolveCodeBehindField = null,
-            Func<string, bool>? codeBehindHasMember = null)
+            Func<string, bool>? codeBehindHasMember = null,
+            DefaultContentResolver? defaultContent = null)
         {
             _resolver = resolver;
             _fileText = fileText;
@@ -91,6 +93,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             _pageDefaults = pageDefaults;
             _resolveCodeBehindField = resolveCodeBehindField ?? ((_, _) => (null, null));
             _codeBehindHasMember = codeBehindHasMember ?? (_ => false);
+            _defaultContent = defaultContent ?? (_ => null);
         }
 
         private readonly struct ExtractBinding
@@ -891,6 +894,10 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 {
                     EmitContentPlaceHolder(node, m);
                 }
+                else if (_defaultContent(rc.MetadataName) is { } content)
+                {
+                    EmitDefaultContent(node, content, m);
+                }
                 else
                 {
                     EmitChildren(node.Children, "__ctrl", rc.MetadataName, m);
@@ -994,6 +1001,41 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             {
                 EmitChildren(node.Children, "__ctrl", "System.Web.UI.WebControls.ContentPlaceHolder", m);
             }
+        }
+
+        // Assigns a control's inner literal text to its string default property
+        // (ListItem's Text), the WebForms ControlBuilder behavior for a
+        // [ParseChildren(true, "<prop>")] string property. An explicit attribute
+        // of the same name wins, so it's left to EmitAttributes. ListItemControlBuilder
+        // HTML-decodes the text and drops whitespace-only bodies; the base builder
+        // keeps the text verbatim (content.HtmlDecode / content.AllowWhitespace).
+        private void EmitDefaultContent(ServerControlNode node, DefaultContentProperty content, IndentedTextWriter m)
+        {
+            foreach (MarkupAttribute attribute in node.Attributes)
+            {
+                if (string.Equals(attribute.Name, content.PropertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            var raw = new StringBuilder();
+            foreach (MarkupNode child in node.Children)
+            {
+                if (child is LiteralNode literal)
+                {
+                    raw.Append(literal.Text);
+                }
+            }
+
+            string text = raw.ToString();
+            if (text.Length == 0 || (!content.AllowWhitespace && string.IsNullOrWhiteSpace(text)))
+            {
+                return;
+            }
+
+            string value = content.HtmlDecode ? System.Net.WebUtility.HtmlDecode(text) : text;
+            m.Line($"__ctrl.{content.PropertyName} = {Literal(value)};");
         }
 
         // Content with code blocks renders through a delegate. The ASP.NET compiler
