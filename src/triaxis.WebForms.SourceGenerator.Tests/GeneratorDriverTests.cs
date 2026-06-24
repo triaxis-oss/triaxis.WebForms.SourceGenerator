@@ -471,6 +471,59 @@ public class GeneratorDriverTests
     }
 
     [Fact]
+    public void ListItem_inner_text_becomes_Text_matching_ListItemControlBuilder()
+    {
+        // A ListControl's <asp:ListItem> takes its inner literal text as its Text
+        // property — the WebForms ControlBuilder behavior for a control whose
+        // [ParseChildren(true, "<prop>")] default property is a string. The
+        // classic parser routes it through ListItemControlBuilder, which
+        // HTML-decodes the text and drops whitespace-only bodies. Without this
+        // every static-markup dropdown rendered with blank options.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } }\n" +
+            "  public class ControlBuilder { }\n" +
+            "  [System.AttributeUsage(System.AttributeTargets.Class)] public class ParseChildrenAttribute : System.Attribute { public ParseChildrenAttribute(bool a) { } public ParseChildrenAttribute(bool a, string b) { } }\n" +
+            "  [System.AttributeUsage(System.AttributeTargets.Class)] public class ControlBuilderAttribute : System.Attribute { public ControlBuilderAttribute(System.Type t) { } } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace System.Web.UI.WebControls {\n" +
+            "  public class ListItemControlBuilder : System.Web.UI.ControlBuilder { }\n" +
+            "  [System.Web.UI.ControlBuilder(typeof(ListItemControlBuilder))]\n" +
+            "  [System.Web.UI.ParseChildren(true, \"Text\")]\n" +
+            "  public sealed class ListItem { public string Text { get; set; } public string Value { get; set; } }\n" +
+            "  public class ListItemCollection { public void Add(ListItem item) { } }\n" +
+            "  [System.Web.UI.ParseChildren(true, \"Items\")] public class ListControl : System.Web.UI.Control { public ListItemCollection Items { get; } = new ListItemCollection(); }\n" +
+            "  public class DropDownList : ListControl { } }\n";
+        string text = RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\"><asp:DropDownList runat=\"server\" ID=\"cbSort\">\r\n" +
+            "  <asp:ListItem>Template Name</asp:ListItem>\r\n" +                              // inner-text form
+            "  <asp:ListItem Text=\"Date Added\" Value=\"1\" />\r\n" +                         // attribute form
+            "  <asp:ListItem Text=\"Explicit\" Value=\"3\">InnerLoses</asp:ListItem>\r\n" +    // attribute overrides inner text
+            "  <asp:ListItem Value=\"4\">   </asp:ListItem>\r\n" +                             // whitespace-only body
+            "  <asp:ListItem>Reports &amp; Stats</asp:ListItem>\r\n" +                         // HTML entity
+            "</asp:DropDownList></form>\r\n");
+
+        // Inner-text form: the dropped Text is now set from the element body.
+        Assert.Contains("__ctrl.Text = \"Template Name\";", text);
+        // Attribute form unchanged.
+        Assert.Contains("__ctrl.Text = \"Date Added\";", text);
+        Assert.Contains("__ctrl.Value = \"1\";", text);
+        // Explicit Text attribute wins; the inner text is ignored.
+        Assert.Contains("__ctrl.Text = \"Explicit\";", text);
+        Assert.DoesNotContain("InnerLoses", text);
+        // HTML entities decode (ListItemControlBuilder.HtmlDecodeLiterals).
+        Assert.Contains("__ctrl.Text = \"Reports & Stats\";", text);
+        Assert.DoesNotContain("&amp;", text);
+        // The whitespace-only body emits no Text assignment (the item is still
+        // built — its Value is set) — exactly four Text assignments in total.
+        Assert.Contains("__ctrl.Value = \"4\";", text);
+        Assert.Equal(4, text.Split("__ctrl.Text = ").Length - 1);
+        // Items still attach through the collection, not as parsed sub-objects.
+        Assert.Contains(".Items.Add(", text);
+    }
+
+    [Fact]
     public void TimeSpan_property_is_emitted_via_runtime_TypeConverter()
     {
         // TimeSpan is a Layer-1 type: TypeDescriptor.GetConverter(typeof(TimeSpan))

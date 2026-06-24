@@ -25,7 +25,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             System.Func<string, string, (string?, string?)>? codeBehindField = null,
             System.Collections.Generic.IEnumerable<string>? usings = null,
             System.Func<string, bool>? codeBehindHasMember = null,
-            ConstructorForwarding? forwarding = null)
+            ConstructorForwarding? forwarding = null,
+            DefaultContentResolver? defaultContent = null)
         {
             string pageType = string.IsNullOrWhiteSpace(directive.Inherits)
                 ? directive.Kind switch
@@ -43,7 +44,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 : "this.Page";
 
             var tree = new ControlTreeEmitter(resolver, fileText, binder, pageType, classify, isControlContainer,
-                isThemeable, isControl, userControlBindingType, themeTarget, pageDefaults, codeBehindField, codeBehindHasMember);
+                isThemeable, isControl, userControlBindingType, themeTarget, pageDefaults, codeBehindField, codeBehindHasMember, defaultContent);
             ControlTreeEmitter.Result result = tree.Emit(root, directive);
             diagnostics = result.Diagnostics;
             fieldBindingMismatches = result.FieldBindingMismatches;

@@ -62,5 +62,27 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         {
             return parentMetadata == HtmlHead;
         }
+
+        /// <summary>
+        /// The <c>ControlBuilder</c> System.Web attaches to <c>ListItem</c> via
+        /// <c>[ControlBuilder]</c>. Unlike the base builder it HTML-decodes a
+        /// control's inner literal text and rejects whitespace-only bodies
+        /// (<c>ListItemControlBuilder.HtmlDecodeLiterals</c> /
+        /// <c>AllowWhitespaceLiterals</c>). Recognized by simple name because the
+        /// builder type isn't loadable into the analyzer process.
+        /// </summary>
+        public const string ListItemControlBuilder = "ListItemControlBuilder";
+
+        /// <summary>
+        /// Returns <c>true</c> when a control's <c>[ControlBuilder]</c> (given by
+        /// simple type name) HTML-decodes inner literal text and discards
+        /// whitespace-only bodies, the way <c>ListItemControlBuilder</c> does.
+        /// The base <c>ControlBuilder</c> does neither. Add a builder name here
+        /// when it overrides those parser hooks.
+        /// </summary>
+        public static bool BuilderDecodesInnerText(string builderTypeName)
+        {
+            return builderTypeName == ListItemControlBuilder;
+        }
     }
 }

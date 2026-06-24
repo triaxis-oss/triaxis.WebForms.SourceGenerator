@@ -70,4 +70,31 @@ namespace triaxis.WebForms.SourceGenerator.Emit
     /// <summary>True when the parent accepts literal text + parsed controls
     /// (a <c>[ParseChildren(false)]</c> control implementing IParserAccessor).</summary>
     internal delegate bool ControlContainerPredicate(string parentTypeMetadataName);
+
+    /// <summary>How a control with a string-typed default property consumes its
+    /// inner literal text. A <c>[ParseChildren(true, "&lt;prop&gt;")]</c> control
+    /// whose default property is a string (e.g. <c>ListItem.Text</c>) assigns the
+    /// element's inner text to that property — the WebForms mechanism behind
+    /// <c>&lt;asp:ListItem&gt;foo&lt;/asp:ListItem&gt;</c>. The decode / whitespace
+    /// rules come from the control's <c>[ControlBuilder]</c>:
+    /// <c>ListItemControlBuilder</c> HTML-decodes the text and drops
+    /// whitespace-only bodies; the base builder does neither.</summary>
+    internal readonly struct DefaultContentProperty
+    {
+        public DefaultContentProperty(string propertyName, bool htmlDecode, bool allowWhitespace)
+        {
+            PropertyName = propertyName;
+            HtmlDecode = htmlDecode;
+            AllowWhitespace = allowWhitespace;
+        }
+
+        public string PropertyName { get; }
+        public bool HtmlDecode { get; }
+        public bool AllowWhitespace { get; }
+    }
+
+    /// <summary>Returns the inner-text target for a control type, or <c>null</c>
+    /// when the control has no string default property (its inner content folds
+    /// as child controls/literals or property elements instead).</summary>
+    internal delegate DefaultContentProperty? DefaultContentResolver(string controlMetadataName);
 }

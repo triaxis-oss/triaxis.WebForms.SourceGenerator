@@ -429,6 +429,7 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
 
         AttributeBinder binder = (metadata, name, value, container) => BindAttribute(compilation, codeBehind, metadata, name, value, container, layer3Fallbacks);
         ChildClassifier classify = (parentMeta, childLocal, childIsServer) => ClassifyChild(compilation, parentMeta, childLocal, childIsServer);
+        DefaultContentResolver defaultContent = metadata => ResolveDefaultContent(compilation, metadata);
         ControlContainerPredicate isControlContainer = parentMeta => IsControlContainer(compilation, parentMeta);
         System.Func<string, bool> isThemeable = metadata => IsThemeable(compilation, controlSymbol, metadata);
         System.Func<string, bool> isControl = metadata => IsControlType(compilation, controlSymbol, metadata);
@@ -446,7 +447,8 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
             (id, controlMetadata) => ResolveCodeBehindField(compilation, codeBehind, id, controlMetadata),
             usings,
             id => CodeBehindHasMember(codeBehind, id),
-            BuildConstructorForwarding(codeBehind));
+            BuildConstructorForwarding(codeBehind),
+            defaultContent);
 
         foreach (string typeName in layer3Fallbacks)
         {
@@ -1271,6 +1273,49 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         }
 
         return ChildPlacement.Skip($"no property '{childLocalName}' on {parentMetadataName}");
+    }
+
+    // A control with a string-typed default property (declared via
+    // [ParseChildren(true, "<prop>")], e.g. ListItem's "Text") takes its inner
+    // literal text as that property's value — the general WebForms mechanism
+    // behind <asp:ListItem>foo</asp:ListItem>. The HTML-decode / whitespace
+    // rules come from the control's [ControlBuilder] (only ListItemControlBuilder
+    // overrides them today). Returns null for controls whose default property is
+    // a collection/template/complex object (folded as child elements) or which
+    // have no default property — their inner content is handled elsewhere.
+    private static DefaultContentProperty? ResolveDefaultContent(Compilation compilation, string controlMetadataName)
+    {
+        if (compilation.GetTypeByMetadataName(controlMetadataName) is not INamedTypeSymbol type)
+        {
+            return null;
+        }
+
+        (bool asProperties, string? defaultProperty) = GetParseChildren(type);
+        if (!asProperties || defaultProperty == null
+            || FindSettableProperty(type, defaultProperty) is not { Type.SpecialType: SpecialType.System_String } prop)
+        {
+            return null;
+        }
+
+        bool decode = ControlBuilderName(type) is { } builder && WebFormsContract.BuilderDecodesInnerText(builder);
+        return new DefaultContentProperty(prop.Name, htmlDecode: decode, allowWhitespace: !decode);
+    }
+
+    // The simple name of the [ControlBuilder(typeof(X))] type, if any — lets the
+    // generator recognise ListItemControlBuilder without loading System.Web.
+    private static string? ControlBuilderName(INamedTypeSymbol type)
+    {
+        foreach (AttributeData attr in type.GetAttributes())
+        {
+            if (attr.AttributeClass?.Name == "ControlBuilderAttribute"
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is INamedTypeSymbol builder)
+            {
+                return builder.Name;
+            }
+        }
+
+        return null;
     }
 
     private static bool IsControlContainer(Compilation compilation, string parentMetadataName)
