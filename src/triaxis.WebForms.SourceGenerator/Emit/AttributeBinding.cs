@@ -53,9 +53,12 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             return new AttributeBinding(AttributeBindingKind.Property, name, valueExpression, null);
         }
 
-        public static AttributeBinding Attribute()
+        /// <param name="valueExpression">The C# expression assigned via
+        /// <c>SetAttribute</c> — a string literal, or a concatenation when the
+        /// markup value embeds a <c>&lt;%= %&gt;</c> render expression.</param>
+        public static AttributeBinding Attribute(string valueExpression)
         {
-            return new AttributeBinding(AttributeBindingKind.Attribute, null, null, null);
+            return new AttributeBinding(AttributeBindingKind.Attribute, null, valueExpression, null);
         }
 
         public static AttributeBinding Event(string eventName, string handlerMethod)
