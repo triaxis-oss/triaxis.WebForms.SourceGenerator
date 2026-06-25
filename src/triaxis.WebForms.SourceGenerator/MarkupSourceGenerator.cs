@@ -523,7 +523,7 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
             }
 
             return ImplementsAttributeAccessor(type)
-                ? AttributeBinding.Attribute()
+                ? AttributeBinding.Attribute(ExpandoValue(value))
                 : AttributeBinding.Skip($"unsupported property type {property.Type.ToDisplayString()}");
         }
 
@@ -545,8 +545,17 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         }
 
         return ImplementsAttributeAccessor(type)
-            ? AttributeBinding.Attribute()
+            ? AttributeBinding.Attribute(ExpandoValue(value))
             : AttributeBinding.Skip("no matching property/event and type is not IAttributeAccessor");
+    }
+
+    // A SetAttribute expando always receives a string: an embedded <%= %> render
+    // expression concatenates at render time, otherwise it's a plain literal.
+    private static string ExpandoValue(string value)
+    {
+        return CodeRender.HasRenderExpression(value)
+            ? CodeRender.TryBuildConcatenation(value) ?? StringLiteral(value)
+            : StringLiteral(value);
     }
 
     // The data field of a two-way Bind("Field") / Bind('Field') expression.
@@ -927,6 +936,16 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
 
     private static string? BuildValueExpression(ITypeSymbol propertyType, string value, Compilation compilation, ICollection<string>? layer3Fallbacks)
     {
+        // An embedded <%= %> / <%: %> render expression in the value (a cache-bust
+        // query string on a script Path, an inline ClientID, …) evaluates at
+        // render time, so it compiles to a runtime concatenation rather than a
+        // literal. Only string-typed targets can receive one.
+        if ((propertyType.SpecialType is SpecialType.System_String or SpecialType.System_Object)
+            && CodeRender.HasRenderExpression(value))
+        {
+            return CodeRender.TryBuildConcatenation(value);
+        }
+
         // Nullable<T>: convert the markup value through T's converter (via
         // Layer 1's invariant-culture pathway) and let C#'s implicit
         // T → T? lift it. Without this, every Nullable<T> property fell

@@ -291,7 +291,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         // the parser, so split it out of the literal text here; this
                         // run carries no render code (that routes to the delegate
                         // path above), only static text and data-binding.
-                        foreach ((char kind, string text) in SplitCode(literal.Text))
+                        foreach ((char kind, string text) in CodeRender.Split(literal.Text))
                         {
                             run.Add((kind == '#', kind == '#' ? text.Replace("Bind(", "Eval(") : text));
                         }
@@ -666,7 +666,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         w.Line($"{targetVar}.{binding.PropertyName} = {binding.ValueExpression};");
                         break;
                     case AttributeBindingKind.Attribute:
-                        w.Line($"(({AttributeAccessor}){targetVar}).SetAttribute({Literal(attribute.Name)}, {Literal(attribute.Value)});");
+                        w.Line($"(({AttributeAccessor}){targetVar}).SetAttribute({Literal(attribute.Name)}, {binding.ValueExpression});");
                         break;
                     case AttributeBindingKind.Skip:
                         _diagnostics.Add($"<{node.RawName}> attribute '{attribute.Name}': {binding.SkipReason}");
@@ -927,7 +927,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         m.Line($"__ctrl.{binding.PropertyName} = {binding.ValueExpression};");
                         break;
                     case AttributeBindingKind.Attribute:
-                        m.Line($"(({AttributeAccessor})__ctrl).SetAttribute({Literal(attribute.Name)}, {Literal(attribute.Value)});");
+                        m.Line($"(({AttributeAccessor})__ctrl).SetAttribute({Literal(attribute.Name)}, {binding.ValueExpression});");
                         break;
                     case AttributeBindingKind.Event:
                         m.Line($"__ctrl.{binding.PropertyName} += this.{binding.ValueExpression};");
@@ -1053,7 +1053,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 switch (child)
                 {
                     case LiteralNode literal:
-                        foreach ((char kind, string text) in SplitCode(literal.Text))
+                        foreach ((char kind, string text) in CodeRender.Split(literal.Text))
                         {
                             segments.Add((kind, text, null));
                         }
@@ -1166,7 +1166,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         // DataBoundLiteralControl).
         private static bool LiteralHasRenderCode(string text)
         {
-            foreach ((char kind, string _) in SplitCode(text))
+            foreach ((char kind, string _) in CodeRender.Split(text))
             {
                 if (kind is '=' or ':' or ' ')
                 {
@@ -1193,56 +1193,6 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 case ' ':
                     r.Line(text);
                     break;
-            }
-        }
-
-        // Splits literal markup into segments: ('L', text) literal, ('=', expr)
-        // <%= %>, (':', expr) <%: %>, (' ', code) <% %>. <%-- --%> comments and
-        // <%# %> data-binding are dropped here (handled elsewhere / deferred).
-        private static IEnumerable<(char Kind, string Text)> SplitCode(string text)
-        {
-            int i = 0;
-            while (i < text.Length)
-            {
-                int open = text.IndexOf("<%", i, StringComparison.Ordinal);
-                if (open < 0)
-                {
-                    yield return ('L', text.Substring(i));
-                    yield break;
-                }
-
-                if (open > i)
-                {
-                    yield return ('L', text.Substring(i, open - i));
-                }
-
-                char kind = open + 2 < text.Length ? text[open + 2] : '\0';
-                if (kind == '-' && open + 3 < text.Length && text[open + 3] == '-')
-                {
-                    int endComment = text.IndexOf("--%>", open + 4, StringComparison.Ordinal);
-                    i = endComment < 0 ? text.Length : endComment + 4;
-                    continue;
-                }
-
-                int contentStart = kind is '=' or ':' or '#' ? open + 3 : open + 2;
-                int close = text.IndexOf("%>", contentStart, StringComparison.Ordinal);
-                if (close < 0)
-                {
-                    // Unterminated — treat the rest as literal.
-                    yield return ('L', text.Substring(open));
-                    yield break;
-                }
-
-                string code = text.Substring(contentStart, close - contentStart).Trim();
-                char segKind = kind switch
-                {
-                    '=' => '=',
-                    ':' => ':',
-                    '#' => '#',
-                    _ => ' ',
-                };
-                yield return (segKind, code);
-                i = close + 2;
             }
         }
 

@@ -383,6 +383,114 @@ public class GeneratorDriverTests
     }
 
     [Fact]
+    public void Embedded_code_render_in_string_property_becomes_concatenation()
+    {
+        // A <%= %> code-render expression embedded in a server control's string
+        // property (e.g. a cache-busting query string on a script Path) must be
+        // evaluated and concatenated, not emitted as a literal string.
+        const string stubs =
+            "namespace System.Web.UI {\n" +
+            "  public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Demo { public class ScriptRef : System.Web.UI.Control { public string Path { get; set; } } }\n";
+        var compilation = CSharpCompilation.Create("test", new[] { CSharpSyntaxTree.ParseText(stubs) });
+        const string markup =
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<%@ Register TagPrefix=\"my\" Namespace=\"Demo\" Assembly=\"test\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\"><my:ScriptRef runat=\"server\" ID=\"s\" " +
+            "Path='common.js?<%= Now().ToString(\"yyyyMMdd\") %>' /></form>\r\n";
+        var additionalTexts = new AdditionalText[] { new InMemoryAdditionalText("/proj/Default.aspx", markup) };
+        var options = new TestOptionsProvider(new Dictionary<string, string>
+        {
+            ["build_property.MSBuildProjectDirectory"] = "/proj",
+        });
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: new[] { new MarkupSourceGenerator().AsSourceGenerator() },
+            additionalTexts: additionalTexts,
+            parseOptions: null,
+            optionsProvider: options);
+
+        GeneratorDriverRunResult result = driver.RunGenerators(compilation).GetRunResult();
+        string text = result.GeneratedTrees.Single(t => t.FilePath.EndsWith("default_aspx.g.cs")).GetText().ToString();
+
+        Assert.Contains("__ctrl.Path = \"common.js?\" + (Now().ToString(\"yyyyMMdd\"));", text);
+        // The raw render syntax must not leak into the literal.
+        Assert.DoesNotContain("<%=", text);
+    }
+
+    [Fact]
+    public void Embedded_code_render_in_expando_attribute_becomes_concatenation()
+    {
+        // A <%= %> on an attribute with no typed property routes through
+        // IAttributeAccessor.SetAttribute; it must still evaluate, not leak the
+        // raw markup into the literal argument.
+        const string stubs =
+            "namespace System.Web.UI {\n" +
+            "  public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public interface IAttributeAccessor { string GetAttribute(string key); void SetAttribute(string key, string value); }\n" +
+            "  public class Control { public string ID { get; set; } } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n" +
+            "namespace Demo { public class Widget : System.Web.UI.Control, System.Web.UI.IAttributeAccessor { public string GetAttribute(string key) => null; public void SetAttribute(string key, string value) { } } }\n";
+        var compilation = CSharpCompilation.Create("test", new[] { CSharpSyntaxTree.ParseText(stubs) });
+        const string markup =
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<%@ Register TagPrefix=\"my\" Namespace=\"Demo\" Assembly=\"test\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\"><my:Widget runat=\"server\" ID=\"w\" " +
+            "data-url='x?<%= Foo() %>' /></form>\r\n";
+        var additionalTexts = new AdditionalText[] { new InMemoryAdditionalText("/proj/Default.aspx", markup) };
+        var options = new TestOptionsProvider(new Dictionary<string, string>
+        {
+            ["build_property.MSBuildProjectDirectory"] = "/proj",
+        });
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: new[] { new MarkupSourceGenerator().AsSourceGenerator() },
+            additionalTexts: additionalTexts,
+            parseOptions: null,
+            optionsProvider: options);
+
+        GeneratorDriverRunResult result = driver.RunGenerators(compilation).GetRunResult();
+        string text = result.GeneratedTrees.Single(t => t.FilePath.EndsWith("default_aspx.g.cs")).GetText().ToString();
+
+        Assert.Contains("SetAttribute(\"data-url\", \"x?\" + (Foo()));", text);
+        Assert.DoesNotContain("<%=", text);
+    }
+
+    [Fact]
+    public void Code_render_with_quotes_in_a_literal_attribute_renders_inline()
+    {
+        // The 400+ plain-HTML cache-busters (<script src='app.js?<%= ... %>'>)
+        // carry inner double quotes; the render path must emit them verbatim as
+        // valid C#, not re-escape them.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); } }\n" +
+            "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n";
+        var compilation = CSharpCompilation.Create("test", new[] { CSharpSyntaxTree.ParseText(stubs) });
+        const string markup =
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<form id=\"f\" runat=\"server\"><script src='app.js?<%= new System.IO.FileInfo(P).ToString(\"yyyyMMdd\") %>'></script></form>\r\n";
+        var additionalTexts = new AdditionalText[] { new InMemoryAdditionalText("/proj/Default.aspx", markup) };
+        var options = new TestOptionsProvider(new Dictionary<string, string>
+        {
+            ["build_property.MSBuildProjectDirectory"] = "/proj",
+        });
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: new[] { new MarkupSourceGenerator().AsSourceGenerator() },
+            additionalTexts: additionalTexts,
+            parseOptions: null,
+            optionsProvider: options);
+
+        GeneratorDriverRunResult result = driver.RunGenerators(compilation).GetRunResult();
+        string text = result.GeneratedTrees.Single(t => t.FilePath.EndsWith("default_aspx.g.cs")).GetText().ToString();
+
+        Assert.Contains("__w.Write(new System.IO.FileInfo(P).ToString(\"yyyyMMdd\"));", text);
+        Assert.DoesNotContain("<%=", text);
+    }
+
+    [Fact]
     public void User_control_registered_by_src_is_built_and_initialized()
     {
         const string stubs =
