@@ -32,9 +32,9 @@ namespace triaxis.WebForms.MSBuildTasks
         [Required] public string AssemblyName { get; set; } = string.Empty;
         [Required] public ITaskItem[] MarkupFiles { get; set; } = Array.Empty<ITaskItem>();
         // App_Browsers\*.browser inputs. When non-empty, emit a single
-        // App_Browsers.compiled sidecar pointing BuildManager at the
-        // source-generated ASP.ApplicationBrowserCapabilitiesFactory so the
-        // runtime resolves it at app start; without this file the factory
+        // __browserCapabilitiesCompiler.compiled sidecar pointing BuildManager
+        // at the source-generated ASP.ApplicationBrowserCapabilitiesFactory so
+        // the runtime resolves it at app start; without this file the factory
         // class is present but never wired and .browser entries silently
         // don't apply.
         public ITaskItem[] BrowserFiles { get; set; } = Array.Empty<ITaskItem>();
@@ -77,11 +77,15 @@ namespace triaxis.WebForms.MSBuildTasks
 
             if (BrowserFiles.Length > 0)
             {
-                // resultType="9" = BuildResultType.AppBrowserCapabilitiesCompiler.
-                // BuildManager looks the sidecar up by the fixed name
-                // App_Browsers.compiled at app start.
-                File.WriteAllText(Path.Combine(OutputDir, "App_Browsers.compiled"),
-                    PreservationFile.PreserveType("9", "/App_Browsers", AssemblyName, "ASP.ApplicationBrowserCapabilitiesFactory"));
+                // The browser-capabilities factory isn't cached under a
+                // path-derived key like a page — BrowserCapabilitiesCompiler
+                // asks BuildManager for the fixed special cache key
+                // "__browserCapabilitiesCompiler", so the sidecar carries that
+                // name verbatim (no hash suffix) and a plain
+                // BuildResultCompiledType (2). Virtual path keeps the trailing
+                // slash aspnet_compiler writes for a directory result.
+                File.WriteAllText(Path.Combine(OutputDir, "__browserCapabilitiesCompiler.compiled"),
+                    PreservationFile.PreserveType(PreservationFile.CompiledType, "/App_Browsers/", AssemblyName, "ASP.ApplicationBrowserCapabilitiesFactory"));
                 count++;
             }
 
