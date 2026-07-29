@@ -101,7 +101,7 @@
     <ItemGroup>
       <_WebFormsGenMarkupForCompiled Include="$(WebFormsGenMarkupInclude)"
                                  Exclude="$(WebFormsGenMarkupExclude)" />
-      <!-- App_Browsers\*.browser drives the App_Browsers.compiled sidecar;
+      <!-- App_Browsers\*.browser drives the __browserCapabilitiesCompiler.compiled sidecar;
            passing an empty list when none exist suppresses the sidecar. -->
       <_WebFormsGenBrowserForCompiled Include="App_Browsers\**\*.browser" />
       <!-- .asmx/.ashx/.svc handlers each need a sidecar binding their virtual
