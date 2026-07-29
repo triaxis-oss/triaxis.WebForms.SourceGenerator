@@ -38,6 +38,28 @@ public class PreservationFileTests
         Assert.Contains("type=\"Watchtower.ServerInterface.WebServiceCalls.Authenticate\"", xml);
     }
 
+    [Theory]
+    [InlineData("/App_Themes/Momentum_Theme/site.css", "Momentum_Theme")]
+    [InlineData("/App_Themes/Momentum_Theme/controls/grid.skin", "Momentum_Theme")]
+    // Directly in App_Themes\, so part of no theme.
+    [InlineData("/App_Themes/orphan.css", null)]
+    [InlineData("/Content/site.css", null)]
+    public void ThemeName_reads_the_theme_folder(string virtualPath, string? expected)
+        => Assert.Equal(expected, PreservationFile.ThemeName(virtualPath));
+
+    [Fact]
+    public void PreserveType_emits_resultType3_for_theme()
+    {
+        // Ground truth: the Theme_Momentum_Theme.compiled aspnet_compiler wrote.
+        string xml = PreservationFile.PreserveType(PreservationFile.CompiledTemplateType,
+            "/App_Themes/Momentum_Theme/", "MomentumWeb.Compiled", "ASP.Momentum_Theme");
+
+        Assert.Contains("resultType=\"3\"", xml);
+        // Trailing slash: the result is a directory, not a file.
+        Assert.Contains("virtualPath=\"/App_Themes/Momentum_Theme/\"", xml);
+        Assert.Contains("type=\"ASP.Momentum_Theme\"", xml);
+    }
+
     [Fact]
     public void Svc_custom_string_is_path_factory_service_defining_assembly()
     {

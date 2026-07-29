@@ -38,6 +38,12 @@ namespace triaxis.WebForms.MSBuildTasks
         // class is present but never wired and .browser entries silently
         // don't apply.
         public ITaskItem[] BrowserFiles { get; set; } = Array.Empty<ITaskItem>();
+        // App_Themes\<name>\ content (.css / .skin) — the same set the generator
+        // folds into one ASP.<name> PageTheme shell per folder. Each distinct
+        // folder needs a Theme_<name>.compiled sidecar; without it the runtime
+        // falls back to compiling the theme directory on first request, which a
+        // non-updatable precompiled app can't do.
+        public ITaskItem[] ThemeFiles { get; set; } = Array.Empty<ITaskItem>();
         // .asmx / .ashx / .svc handlers. Unlike markup these aren't source-
         // generated into page types — each directive names a prebuilt type a
         // non-updatable precompiled app still needs a .compiled sidecar to reach.
@@ -65,7 +71,7 @@ namespace triaxis.WebForms.MSBuildTasks
                     vpath = "/global.asax";
                 }
 
-                string resultType = isGlobalAsax ? "8" : "3";
+                string resultType = isGlobalAsax ? "8" : PreservationFile.CompiledTemplateType;
                 string typeName = isGlobalAsax ? "ASP._global_asax" : "ASP." + Mangle(vpath);
                 string fileName = isGlobalAsax ? "App_global.asax.compiled" : PreservationFile.Name(vpath);
                 File.WriteAllText(Path.Combine(OutputDir, fileName),
@@ -74,6 +80,7 @@ namespace triaxis.WebForms.MSBuildTasks
             }
 
             count += EmitHandlerCompiled(root);
+            count += EmitThemeCompiled(root);
 
             if (BrowserFiles.Length > 0)
             {
@@ -93,6 +100,34 @@ namespace triaxis.WebForms.MSBuildTasks
             // A handler that couldn't be bound logged an error (TWF004): fail the
             // build rather than ship a deployment that 500s at first request.
             return !Log.HasLoggedErrors;
+        }
+
+        // One sidecar per App_Themes\<name>\ folder. Like the browser factory
+        // a theme isn't cached under a path-derived key — ThemeDirectoryCompiler
+        // asks BuildManager for "Theme_<name>", the folder name verbatim — so the
+        // file carries that name with no hash suffix. The type is the generator's
+        // ASP.<name> shell, and the virtual path keeps the trailing slash
+        // aspnet_compiler writes for a directory result.
+        private int EmitThemeCompiled(string root)
+        {
+            var themes = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (ITaskItem item in ThemeFiles)
+            {
+                string? theme = PreservationFile.ThemeName(ToVirtualPath(item, root));
+                if (theme != null)
+                {
+                    themes.Add(theme);
+                }
+            }
+
+            foreach (string theme in themes)
+            {
+                File.WriteAllText(Path.Combine(OutputDir, "Theme_" + theme + ".compiled"),
+                    PreservationFile.PreserveType(PreservationFile.CompiledTemplateType,
+                        "/App_Themes/" + theme + "/", AssemblyName, "ASP." + theme));
+            }
+
+            return themes.Count;
         }
 
         private int EmitHandlerCompiled(string root)

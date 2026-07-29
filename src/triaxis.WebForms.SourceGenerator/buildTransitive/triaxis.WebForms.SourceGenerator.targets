@@ -104,6 +104,9 @@
       <!-- App_Browsers\*.browser drives the __browserCapabilitiesCompiler.compiled sidecar;
            passing an empty list when none exist suppresses the sidecar. -->
       <_WebFormsGenBrowserForCompiled Include="App_Browsers\**\*.browser" />
+      <!-- Same App_Themes glob the generator consumes; the task reduces it to
+           the distinct theme folders and writes one Theme_<name>.compiled each. -->
+      <_WebFormsGenThemeForCompiled Include="$(WebFormsGenThemeInclude)" />
       <!-- .asmx/.ashx/.svc handlers each need a sidecar binding their virtual
            path to the prebuilt type named in the directive; the task resolves
            which built assembly holds that type (and, for .svc, the deployed
@@ -118,6 +121,7 @@
         AssemblyName="$(AssemblyName)"
         MarkupFiles="@(_WebFormsGenMarkupForCompiled)"
         BrowserFiles="@(_WebFormsGenBrowserForCompiled)"
+        ThemeFiles="@(_WebFormsGenThemeForCompiled)"
         HandlerFiles="@(_WebFormsGenHandlerForCompiled)"
         ReferenceAssemblies="@(_WebFormsGenOutputAssemblies)" />
   </Target>

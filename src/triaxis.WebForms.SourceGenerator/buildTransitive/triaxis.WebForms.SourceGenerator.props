@@ -50,6 +50,13 @@
          .compiled target; a property so a consumer can narrow or extend the set. -->
     <WebFormsGenHandlerInclude Condition=" '$(WebFormsGenHandlerInclude)' == '' ">**\*.asmx;**\*.ashx;**\*.svc</WebFormsGenHandlerInclude>
     <WebFormsGenHandlerExclude Condition=" '$(WebFormsGenHandlerExclude)' == '' ">$(BaseIntermediateOutputPath)**;$(OutputPath)**;bin\**;obj\**</WebFormsGenHandlerExclude>
+    <!-- App_Themes\<name>\ content the generator folds into one ASP.<name>
+         PageTheme shell per folder: .css files become the theme's
+         LinkedStyleSheets entries, .skin files become its ControlSkinDelegate
+         methods. Hoisted because the .compiled emitter derives the same theme
+         set from it — a theme the generator emits a shell for but the emitter
+         writes no sidecar for is a theme the runtime can't resolve. -->
+    <WebFormsGenThemeInclude Condition=" '$(WebFormsGenThemeInclude)' == '' ">App_Themes\**\*.css;App_Themes\**\*.skin</WebFormsGenThemeInclude>
     <!-- Full glob patterns added to Content for publish. One property,
          not a separate "extensions" knob, because every transform
          shape MSBuild offers (item-list transform with separator,
@@ -87,14 +94,9 @@
          (one ASP.ApplicationBrowserCapabilitiesFactory aggregated from all
          the files). -->
     <AdditionalFiles Include="App_Browsers\**\*.browser" />
-    <!-- App_Themes\<name>\*.css feeds the theme-shell emitter; each .css
-         declares both the theme it belongs to (the folder name) and an
-         entry in that theme's LinkedStyleSheets[] array. -->
-    <AdditionalFiles Include="App_Themes\**\*.css" />
-    <!-- App_Themes\<name>\*.skin gets parsed + compiled into per-skin
-         ControlSkinDelegate methods registered in the theme's
-         __controlSkins dictionary. -->
-    <AdditionalFiles Include="App_Themes\**\*.skin" />
+    <!-- App_Themes\<name>\ content feeds the theme-shell emitter; each file
+         declares the theme it belongs to by the folder it sits in. -->
+    <AdditionalFiles Include="$(WebFormsGenThemeInclude)" />
     <Content Include="$(WebFormsGenContentInclude)" Exclude="$(WebFormsGenContentExclude)"
              CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

@@ -19,10 +19,11 @@ namespace triaxis.WebForms.MSBuildTasks
     internal static class PreservationFile
     {
         // BuildResultTypeCode values the runtime reads out of a preserve element.
-        // Pages use 3 (BuildResultCompiledTemplateType); a prebuilt-type handler
-        // (.asmx/.ashx) uses 2 (BuildResultCompiledType); a WCF .svc uses 5
+        // Pages and themes use 3 (BuildResultCompiledTemplateType); a prebuilt-type
+        // handler (.asmx/.ashx) uses 2 (BuildResultCompiledType); a WCF .svc uses 5
         // (BuildResultCustomString) and carries its activation data in customString.
         public const string CompiledType = "2";
+        public const string CompiledTemplateType = "3";
         public const string CustomString = "5";
 
         // A standard .asmx/.ashx/.svc directive names its prebuilt type with a
@@ -44,6 +45,23 @@ namespace triaxis.WebForms.MSBuildTasks
             return comma < 0
                 ? (value.Trim(), null)
                 : (value.Substring(0, comma).Trim(), value.Substring(comma + 1).Trim());
+        }
+
+        // The App_Themes\<name>\ folder a virtual path belongs to, which is both
+        // the theme's name and the identifier its generated shell is named after.
+        // Null for a path outside a theme folder (a file sitting directly in
+        // App_Themes\ belongs to no theme) — same rule the generator applies when
+        // it decides which shells to emit, so the two stay in lockstep.
+        public static string? ThemeName(string virtualPath)
+        {
+            const string prefix = "/App_Themes/";
+            if (!virtualPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            int end = virtualPath.IndexOf('/', prefix.Length);
+            return end < 0 ? null : virtualPath.Substring(prefix.Length, end - prefix.Length);
         }
 
         public static string PreserveType(string resultType, string virtualPath, string assembly, string type) =>
