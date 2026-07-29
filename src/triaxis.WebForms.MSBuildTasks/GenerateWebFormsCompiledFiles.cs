@@ -106,8 +106,9 @@ namespace triaxis.WebForms.MSBuildTasks
         // a theme isn't cached under a path-derived key — ThemeDirectoryCompiler
         // asks BuildManager for "Theme_<name>", the folder name verbatim — so the
         // file carries that name with no hash suffix. The type is the generator's
-        // ASP.<name> shell, and the virtual path keeps the trailing slash
-        // aspnet_compiler writes for a directory result.
+        // shell, whose name is the folder mangled into an identifier, and the
+        // virtual path keeps the trailing slash aspnet_compiler writes for a
+        // directory result.
         private int EmitThemeCompiled(string root)
         {
             var themes = new SortedSet<string>(StringComparer.Ordinal);
@@ -124,7 +125,8 @@ namespace triaxis.WebForms.MSBuildTasks
             {
                 File.WriteAllText(Path.Combine(OutputDir, "Theme_" + theme + ".compiled"),
                     PreservationFile.PreserveType(PreservationFile.CompiledTemplateType,
-                        "/App_Themes/" + theme + "/", AssemblyName, "ASP." + theme));
+                        "/App_Themes/" + theme + "/", AssemblyName,
+                        "ASP." + PreservationFile.Identifier(theme)));
             }
 
             return themes.Count;

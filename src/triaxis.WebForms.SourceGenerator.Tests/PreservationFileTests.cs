@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Emit;
 using triaxis.WebForms.MSBuildTasks;
+using triaxis.WebForms.SourceGenerator.Emit;
 
 namespace triaxis.WebForms.SourceGenerator.Tests;
 
@@ -46,6 +47,22 @@ public class PreservationFileTests
     [InlineData("/Content/site.css", null)]
     public void ThemeName_reads_the_theme_folder(string virtualPath, string? expected)
         => Assert.Equal(expected, PreservationFile.ThemeName(virtualPath));
+
+    [Theory]
+    [InlineData("Momentum_Theme", "Momentum_Theme")]
+    [InlineData("My-Theme", "My_Theme")]
+    [InlineData("blue theme.v2", "blue_theme_v2")]
+    // Identifiers can't lead with a digit.
+    [InlineData("2fast", "_2fast")]
+    // A keyword is a valid metadata name; only the declaration escapes it.
+    [InlineData("default", "default")]
+    public void Identifier_mangles_a_name_into_an_identifier(string folder, string expected)
+    {
+        Assert.Equal(expected, PreservationFile.Identifier(folder));
+        // The sidecar's type must name the type the generator declares, so both
+        // assemblies have to derive it identically.
+        Assert.Equal(GeneratedNaming.Identifier(folder), PreservationFile.Identifier(folder));
+    }
 
     [Fact]
     public void PreserveType_emits_resultType3_for_theme()

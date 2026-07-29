@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace triaxis.WebForms.MSBuildTasks
@@ -62,6 +63,31 @@ namespace triaxis.WebForms.MSBuildTasks
 
             int end = virtualPath.IndexOf('/', prefix.Length);
             return end < 0 ? null : virtualPath.Substring(prefix.Length, end - prefix.Length);
+        }
+
+        // A name as a C# identifier: every character an identifier can't hold
+        // replaced by `_`, and a leading `_` when it would otherwise start with a
+        // digit. A metadata name, so no `@` escape even when the result is a C#
+        // keyword.
+        //
+        // MUST stay in sync with GeneratedNaming.Identifier in the generator,
+        // which names the type a theme's sidecar has to point at; a test asserts
+        // the two agree. The sidecar's FILENAME keeps the folder name verbatim —
+        // that one is a runtime cache key, not an identifier.
+        public static string Identifier(string name)
+        {
+            var sb = new StringBuilder(name.Length + 1);
+            foreach (char c in name)
+            {
+                sb.Append(char.IsLetterOrDigit(c) || c == '_' ? c : '_');
+            }
+
+            if (sb.Length == 0 || char.IsDigit(sb[0]))
+            {
+                sb.Insert(0, '_');
+            }
+
+            return sb.ToString();
         }
 
         public static string PreserveType(string resultType, string virtualPath, string assembly, string type) =>

@@ -1301,6 +1301,42 @@ public class GeneratorDriverTests
         Assert.Contains("val.Text = \"themed\";", text);
     }
 
+    [Theory]
+    // A folder name is a path segment, so it can hold what an identifier can't.
+    [InlineData("My-Theme", "public class My_Theme :")]
+    // Mangles to a keyword, which only the declaration escapes.
+    [InlineData("default", "public class @default :")]
+    public void Generator_mangles_theme_folder_into_the_shell_name(string folder, string expected)
+    {
+        var compilation = CSharpCompilation.Create("test");
+        var additionalTexts = new AdditionalText[]
+        {
+            new InMemoryAdditionalText($"/proj/App_Themes/{folder}/site.css", "body{}"),
+        };
+        var options = new TestOptionsProvider(new Dictionary<string, string>
+        {
+            ["build_property.MSBuildProjectDirectory"] = "/proj",
+        });
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: new[] { new MarkupSourceGenerator().AsSourceGenerator() },
+            additionalTexts: additionalTexts,
+            parseOptions: null,
+            optionsProvider: options);
+
+        GeneratorDriverRunResult result = driver.RunGenerators(compilation).GetRunResult();
+
+        // Hint name keeps the folder name, so two folders mangling to the same
+        // identifier still produce two files (and a diagnosable duplicate class).
+        SyntaxTree theme = result.GeneratedTrees.Single(t => t.FilePath.EndsWith($"{folder}.g.cs"));
+        string text = theme.GetText().ToString();
+
+        Assert.Contains(expected, text);
+        // Paths still carry the folder's real name.
+        Assert.Contains($"\"~/App_Themes/{folder}/site.css\"", text);
+        Assert.Contains($"\"/App_Themes/{folder}/\"", text);
+    }
+
     private sealed class InMemoryAdditionalText : AdditionalText
     {
         private readonly string _text;
