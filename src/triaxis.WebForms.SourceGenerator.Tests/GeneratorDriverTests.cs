@@ -1259,6 +1259,48 @@ public class GeneratorDriverTests
         return result.GeneratedTrees.Single(t => t.FilePath.EndsWith("default_aspx.g.cs")).GetText().ToString();
     }
 
+    [Fact]
+    public void Generator_emits_theme_shell_from_stylesheets_and_skins()
+    {
+        const string stubs =
+            "namespace System.Web.UI.WebControls { public class Label { public string Text { get; set; } } }\n";
+        var compilation = CSharpCompilation.Create("test", new[] { CSharpSyntaxTree.ParseText(stubs) });
+        var additionalTexts = new AdditionalText[]
+        {
+            new InMemoryAdditionalText("/proj/App_Themes/Momentum_Theme/site.css", "body{}"),
+            new InMemoryAdditionalText("/proj/App_Themes/Momentum_Theme/print/print.css", "body{}"),
+            new InMemoryAdditionalText("/proj/App_Themes/Momentum_Theme/controls.skin",
+                "<asp:Label runat=\"server\" Text=\"themed\" />"),
+            // Directly in App_Themes\, so part of no theme at all.
+            new InMemoryAdditionalText("/proj/App_Themes/orphan.css", "body{}"),
+        };
+        var options = new TestOptionsProvider(new Dictionary<string, string>
+        {
+            ["build_property.MSBuildProjectDirectory"] = "/proj",
+        });
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: new[] { new MarkupSourceGenerator().AsSourceGenerator() },
+            additionalTexts: additionalTexts,
+            parseOptions: null,
+            optionsProvider: options);
+
+        GeneratorDriverRunResult result = driver.RunGenerators(compilation).GetRunResult();
+
+        SyntaxTree theme = result.GeneratedTrees.Single(t => t.FilePath.EndsWith("Momentum_Theme.g.cs"));
+        string text = theme.GetText().ToString();
+
+        // The type name the Theme_<name>.compiled sidecar points BuildManager at.
+        Assert.Contains("public class Momentum_Theme : global::System.Web.UI.PageTheme", text);
+        Assert.Contains("\"~/App_Themes/Momentum_Theme/site.css\"", text);
+        // A stylesheet in a subdirectory links from there, not from the theme root.
+        Assert.Contains("\"~/App_Themes/Momentum_Theme/print/print.css\"", text);
+        Assert.DoesNotContain("orphan", text);
+        // The skin entry becomes a registered ControlSkinDelegate.
+        Assert.Contains("CreateSkinKey(typeof(global::System.Web.UI.WebControls.Label)", text);
+        Assert.Contains("val.Text = \"themed\";", text);
+    }
+
     private sealed class InMemoryAdditionalText : AdditionalText
     {
         private readonly string _text;

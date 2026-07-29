@@ -201,12 +201,10 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         return "/" + normalized.TrimStart('/');
     }
 
-    // Detects whether a .css file path points into App_Themes\<name>\ and,
-    // if so, returns the theme name plus the runtime-relative
-    // ~/App_Themes/<name>/<file>.css URL that goes into LinkedStyleSheets.
-    // Files outside any theme folder (App_Themes\foo.css at the root, or
-    // .css files not under App_Themes at all) return null.
-    private static (string Theme, string LinkedStylesheet)? ExtractThemeStylesheet(string filePath, AnalyzerConfigOptionsProvider options)
+    // The App_Themes\<name>\ folder a file belongs to, plus its web-root-relative
+    // path (no leading slash). Null when the file is outside any theme folder —
+    // one sitting directly in App_Themes\, or not under App_Themes at all.
+    private static (string Theme, string VirtualPath)? ExtractThemeFile(string filePath, AnalyzerConfigOptionsProvider options)
     {
         string virtualPath = ToVirtualPath(filePath, options).TrimStart('/');
         const string prefix = "App_Themes/";
@@ -214,36 +212,32 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         {
             return null;
         }
+
         int themeEnd = virtualPath.IndexOf('/', prefix.Length);
-        if (themeEnd < 0)
-        {
-            return null;
-        }
-        string theme = virtualPath.Substring(prefix.Length, themeEnd - prefix.Length);
-        string fileName = virtualPath.Substring(virtualPath.LastIndexOf('/') + 1);
-        return (theme, $"~/App_Themes/{theme}/{fileName}");
+        return themeEnd < 0
+            ? null
+            : (virtualPath.Substring(prefix.Length, themeEnd - prefix.Length), virtualPath);
     }
 
-    // Same path → theme-name extraction as ExtractThemeStylesheet, but for
-    // .skin files; the payload is the file content (the parser + emitter
-    // walk it later) rather than a URL.
+    // A theme .css file as the runtime-relative URL that goes into
+    // LinkedStyleSheets. The URL carries the file's whole path under the theme
+    // folder, so a stylesheet in a subdirectory links from that subdirectory
+    // rather than from the theme root.
+    private static (string Theme, string LinkedStylesheet)? ExtractThemeStylesheet(string filePath, AnalyzerConfigOptionsProvider options)
+    {
+        (string Theme, string VirtualPath)? file = ExtractThemeFile(filePath, options);
+        return file is null ? null : (file.Value.Theme, "~/" + file.Value.VirtualPath);
+    }
+
+    // A theme .skin file as the virtual path the parser reports diagnostics
+    // under plus its content, which the parser + emitter walk later.
     private static (string Theme, string VirtualPath, string Content)? ExtractThemeSkin(
         AdditionalText text, AnalyzerConfigOptionsProvider options, CancellationToken cancellationToken)
     {
-        string virtualPath = ToVirtualPath(text.Path, options).TrimStart('/');
-        const string prefix = "App_Themes/";
-        if (!virtualPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        int themeEnd = virtualPath.IndexOf('/', prefix.Length);
-        if (themeEnd < 0)
-        {
-            return null;
-        }
-        string theme = virtualPath.Substring(prefix.Length, themeEnd - prefix.Length);
-        string content = text.GetText(cancellationToken)?.ToString() ?? string.Empty;
-        return (theme, "/" + virtualPath, content);
+        (string Theme, string VirtualPath)? file = ExtractThemeFile(text.Path, options);
+        return file is null
+            ? null
+            : (file.Value.Theme, "/" + file.Value.VirtualPath, text.GetText(cancellationToken)?.ToString() ?? string.Empty);
     }
 
     // Skin compilation reuses the same control-resolver / attribute-binder /
