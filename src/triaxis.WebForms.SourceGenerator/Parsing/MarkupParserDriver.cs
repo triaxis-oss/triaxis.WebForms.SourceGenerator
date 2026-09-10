@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Web.Compilation;
 using triaxis.WebForms.SourceGenerator.Model;
@@ -166,6 +167,12 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
             if (map.TryGetValue("Language", out string? language) && !string.IsNullOrWhiteSpace(language)) { directive.Language = language; }
             if (map.TryGetValue("AutoEventWireup", out string? autoEvent)) { directive.AutoEventWireup = ParseBool(autoEvent, defaultValue: true); }
             if (map.TryGetValue("Async", out string? async)) { directive.Async = ParseBool(async, defaultValue: false); }
+            if (map.TryGetValue("AsyncTimeout", out string? timeout)
+                && double.TryParse(timeout, NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds))
+            {
+                directive.AsyncTimeoutSeconds = seconds;
+            }
+
             if (map.TryGetValue("EnableSessionState", out string? session))
             {
                 directive.RequiresSessionState = !string.Equals(session, "False", StringComparison.OrdinalIgnoreCase);

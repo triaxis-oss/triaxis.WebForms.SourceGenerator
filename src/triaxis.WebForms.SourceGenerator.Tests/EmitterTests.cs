@@ -63,6 +63,25 @@ public class EmitterTests
         Assert.Contains("global::System.Web.IHttpAsyncHandler", frame);
         Assert.DoesNotContain("global::System.Web.IHttpHandler", frame);
         Assert.Contains("AsyncMode = true;", frame);
+        // Page implements IHttpAsyncHandler explicitly, so the generated class
+        // has to supply both members itself.
+        Assert.Contains("public global::System.IAsyncResult BeginProcessRequest(", frame);
+        Assert.Contains("=> AsyncPageBeginProcessRequest(context, cb, data);", frame);
+        Assert.Contains("public void EndProcessRequest(global::System.IAsyncResult ar)", frame);
+        Assert.Contains("=> AsyncPageEndProcessRequest(ar);", frame);
+    }
+
+    [Fact]
+    public void Synchronous_page_emits_no_async_handler_members()
+    {
+        MarkupDirective directive = MarkupParserDriver.Parse(
+            "Default.aspx",
+            new StringReader("<%@ Page Inherits=\"Sample.Forms_frmHome\" %>\r\n")).Directive!;
+
+        string frame = PageFrameEmitter.Emit(directive, "/Default.aspx");
+
+        Assert.DoesNotContain("BeginProcessRequest", frame);
+        Assert.DoesNotContain("AsyncTimeout", frame);
     }
 
     [Fact]
