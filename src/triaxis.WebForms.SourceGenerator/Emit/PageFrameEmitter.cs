@@ -78,7 +78,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     w.Blank();
                     EmitBuildControlTree(w, typeName, directive, treeBody);
                     w.Blank();
-                    EmitFrameworkInitialize(w, isPage, requestValidationEnabled);
+                    EmitFrameworkInitialize(w, isPage, requestValidationEnabled, directive.Async);
 
                     if (isPage)
                     {
@@ -103,7 +103,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
 
             if (isPage)
             {
-                declaration += ", global::System.Web.IHttpHandler";
+                // Async="true" swaps the handler contract: the runtime picks the
+                // begin/end pair off Page instead of ProcessRequest.
+                declaration += directive.Async
+                    ? ", global::System.Web.IHttpAsyncHandler"
+                    : ", global::System.Web.IHttpHandler";
             }
 
             return declaration;
@@ -226,7 +230,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             }
         }
 
-        private static void EmitFrameworkInitialize(IndentedTextWriter w, bool isPage, bool requestValidationEnabled)
+        private static void EmitFrameworkInitialize(IndentedTextWriter w, bool isPage, bool requestValidationEnabled, bool async)
         {
             w.Line(DebuggerNonUserCode);
             using (w.Block("protected override void FrameworkInitialize()"))
@@ -236,6 +240,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 if (isPage)
                 {
                     w.Line("AddWrappedFileDependencies(__fileDependencies);");
+                    if (async)
+                    {
+                        w.Line("AsyncMode = true;");
+                    }
+
                     string mode = requestValidationEnabled ? "Enabled" : "Disabled";
                     w.Line($"ValidateRequestMode = global::System.Web.UI.ValidateRequestMode.{mode};");
                 }

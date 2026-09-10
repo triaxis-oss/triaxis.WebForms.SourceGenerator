@@ -52,6 +52,20 @@ public class EmitterTests
     }
 
     [Fact]
+    public void Async_page_implements_IHttpAsyncHandler_and_sets_AsyncMode()
+    {
+        MarkupDirective directive = MarkupParserDriver.Parse(
+            "Default.aspx",
+            new StringReader("<%@ Page Async=\"true\" Inherits=\"Sample.Forms_frmHome\" %>\r\n")).Directive!;
+
+        string frame = PageFrameEmitter.Emit(directive, "/Default.aspx");
+
+        Assert.Contains("global::System.Web.IHttpAsyncHandler", frame);
+        Assert.DoesNotContain("global::System.Web.IHttpHandler", frame);
+        Assert.Contains("AsyncMode = true;", frame);
+    }
+
+    [Fact]
     public void Fold_classifies_server_controls_and_literals()
     {
         ServerControlNode root = MarkupTreeFolder.Fold("Default.aspx", SamplePage, serverPrefixes: null, out IReadOnlyList<string> errors);

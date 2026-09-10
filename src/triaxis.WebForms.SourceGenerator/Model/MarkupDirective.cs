@@ -25,6 +25,7 @@ namespace triaxis.WebForms.SourceGenerator.Model
         public string Language { get; set; } = "C#";
         public bool AutoEventWireup { get; set; } = true;
         public bool RequiresSessionState { get; set; } = true;
+        public bool Async { get; set; }
         public IReadOnlyDictionary<string, string> Attributes { get; set; } =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
