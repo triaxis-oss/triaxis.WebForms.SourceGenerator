@@ -397,6 +397,12 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
             }
         }
 
+        foreach (string attribute in DirectiveAttributes.Unhonored(parsed.Directive))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(
+                s_unhonoredDirectiveAttribute, Location.None, attribute, parsed.Directive.Kind, file.VirtualPath));
+        }
+
         parsed.Directive.MasterType = ResolveTypeReference(parsed.MasterType, pageDirectory);
         parsed.Directive.PreviousPageType = ResolveTypeReference(parsed.PreviousPageType, pageDirectory);
 
@@ -1227,6 +1233,17 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
     // on first access). Surfacing as Error means the build fails with a
     // fixable diagnostic instead of going green and crashing in the
     // browser.
+    // A directive attribute the generator never reads. The markup keeps
+    // compiling, so without this the only symptom is behavior the page asked
+    // for and didn't get — at runtime, in production, months later.
+    private static readonly DiagnosticDescriptor s_unhonoredDirectiveAttribute = new(
+        "TWF004",
+        "WebForms directive attribute not honored",
+        "Directive attribute '{0}' on the <%@ {1} %> directive in {2} is not honored by the generator and has no effect. Remove it, or implement it in the generator if the page depends on it.",
+        "Triaxis.WebForms",
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
+
     private static readonly DiagnosticDescriptor s_fieldBindingMismatch = new(
         "TWF003",
         "WebForms control type not assignable to codebehind field",

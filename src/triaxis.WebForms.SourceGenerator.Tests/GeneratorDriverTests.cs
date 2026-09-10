@@ -1161,6 +1161,94 @@ public class GeneratorDriverTests
     }
 
     [Fact]
+    public void Unhonored_directive_attributes_emit_TWF004()
+    {
+        // The class of bug this rule exists for: an attribute that reaches the
+        // generator, is understood by nobody, and silently changes nothing.
+        const string stubs =
+            "namespace System.Web.UI { public class Control { public string ID { get; set; } }\n" +
+            "  public class Page : Control { public void InitializeCulture() { } } }\n";
+        RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" AspCompat=\"true\" Trace=\"true\" Asyc=\"true\" %>\r\n",
+            out GeneratorDriverRunResult result);
+
+        string[] reported = result.Results.Single().Diagnostics
+            .Where(d => d.Id == "TWF004")
+            .Select(d => d.GetMessage())
+            .ToArray();
+
+        Assert.Equal(3, reported.Length);
+        // Unimplemented attributes and a typo of one that *is* implemented.
+        Assert.Contains(reported, m => m.Contains("'AspCompat'"));
+        Assert.Contains(reported, m => m.Contains("'Trace'"));
+        Assert.Contains(reported, m => m.Contains("'Asyc'"));
+        Assert.All(reported, m => Assert.Contains("/Default.aspx", m));
+    }
+
+    [Fact]
+    public void Honored_and_compile_model_attributes_stay_quiet()
+    {
+        const string stubs =
+            "namespace System.Web.UI { public class Control { public string ID { get; set; } }\n" +
+            "  public class Page : Control { public void InitializeCulture() { } } }\n";
+        RunDefaultAspx(stubs,
+            "<%@ Page Language=\"C#\" Inherits=\"Foo.Bar\" CodeBehind=\"Default.aspx.cs\" Debug=\"true\" " +
+            "AutoEventWireup=\"false\" Async=\"true\" AsyncTimeout=\"45\" Title=\"T\" EnableViewState=\"false\" %>\r\n",
+            out GeneratorDriverRunResult result);
+
+        Assert.Empty(result.Results.Single().Diagnostics.Where(d => d.Id == "TWF004"));
+    }
+
+    [Fact]
+    public void Page_only_attributes_on_a_user_control_emit_TWF004()
+    {
+        // Theme/EnableViewState are baked by EmitPageDefaults, which never runs
+        // for a .ascx — so on a user control they really are dropped.
+        const string stubs =
+            "namespace System.Web.UI { public class Control { public string ID { get; set; } }\n" +
+            "  public class TemplateControl : Control { }\n" +
+            "  public class UserControl : TemplateControl { } }\n";
+        var compilation = CSharpCompilation.Create("test",
+            new[] { CSharpSyntaxTree.ParseText(stubs) },
+            new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) });
+        var additionalTexts = new AdditionalText[]
+        {
+            new InMemoryAdditionalText("/proj/Widget.ascx", "<%@ Control Inherits=\"Foo.Widget\" Theme=\"Skin\" %>\r\n"),
+        };
+        var options = new TestOptionsProvider(new Dictionary<string, string>
+        {
+            ["build_property.MSBuildProjectDirectory"] = "/proj",
+        });
+
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators: new[] { new MarkupSourceGenerator().AsSourceGenerator() },
+            additionalTexts: additionalTexts,
+            parseOptions: null,
+            optionsProvider: options);
+        GeneratorDriverRunResult result = driver.RunGenerators(compilation).GetRunResult();
+
+        Diagnostic diagnostic = Assert.Single(result.Results.Single().Diagnostics, d => d.Id == "TWF004");
+        Assert.Contains("'Theme'", diagnostic.GetMessage());
+        Assert.Contains("Control", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public void Non_csharp_Language_emits_TWF004()
+    {
+        // Language is otherwise compile-model noise; a page asking for VB is
+        // the one case where ignoring it changes what gets generated.
+        const string stubs =
+            "namespace System.Web.UI { public class Control { public string ID { get; set; } }\n" +
+            "  public class Page : Control { public void InitializeCulture() { } } }\n";
+        RunDefaultAspx(stubs,
+            "<%@ Page Language=\"VB\" Inherits=\"Foo.Bar\" %>\r\n",
+            out GeneratorDriverRunResult result);
+
+        Diagnostic diagnostic = Assert.Single(result.Results.Single().Diagnostics, d => d.Id == "TWF004");
+        Assert.Contains("'Language'", diagnostic.GetMessage());
+    }
+
+    [Fact]
     public void Codebehind_with_only_a_parameterized_ctor_forwards_to_base_and_drops_default_ctor()
     {
         // The codebehind has no parameterless ctor, only one taking services.
