@@ -19,4 +19,16 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Real net48 metadata (System.Web included), so a test can compile the
+       generated page against the framework it actually runs on instead of the
+       hand-written stubs. ExcludeAssets keeps it out of this net10 test
+       assembly's own references; only the path is used. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" GeneratePathProperty="true" ExcludeAssets="all" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>ReferenceAssemblies</_Parameter1>
+      <_Parameter2>$(PkgMicrosoft_NETFramework_ReferenceAssemblies_net48)/build/.NETFramework/v4.8</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
 </Project>

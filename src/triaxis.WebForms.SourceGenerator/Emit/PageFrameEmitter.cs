@@ -80,7 +80,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     w.Blank();
                     EmitBuildControlTree(w, typeName, directive, treeBody);
                     w.Blank();
-                    EmitFrameworkInitialize(w, isPage, requestValidationEnabled, directive.Async);
+                    EmitFrameworkInitialize(w, directive, isPage, requestValidationEnabled);
 
                     if (isPage)
                     {
@@ -88,6 +88,12 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                         EmitGetTypeHashCode(w, virtualPath);
                         w.Blank();
                         EmitProcessRequest(w);
+
+                        if (directive.Async)
+                        {
+                            w.Blank();
+                            EmitAsyncProcessRequest(w);
+                        }
                     }
                 }
             }
@@ -261,7 +267,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             }
         }
 
-        private static void EmitFrameworkInitialize(IndentedTextWriter w, bool isPage, bool requestValidationEnabled, bool async)
+        private static void EmitFrameworkInitialize(IndentedTextWriter w, MarkupDirective directive, bool isPage, bool requestValidationEnabled)
         {
             w.Line(DebuggerNonUserCode);
             using (w.Block("protected override void FrameworkInitialize()"))
@@ -271,9 +277,14 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                 if (isPage)
                 {
                     w.Line("AddWrappedFileDependencies(__fileDependencies);");
-                    if (async)
+                    if (directive.Async)
                     {
                         w.Line("AsyncMode = true;");
+                    }
+
+                    if (directive.AsyncTimeoutSeconds is double seconds)
+                    {
+                        w.Line($"AsyncTimeout = global::System.TimeSpan.FromSeconds({seconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}D);");
                     }
 
                     string mode = requestValidationEnabled ? "Enabled" : "Disabled";
@@ -298,6 +309,27 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             {
                 w.Line("base.ProcessRequest(context);");
             }
+        }
+
+        /// <summary>
+        /// <c>Page</c> implements <see cref="System.Web.IHttpAsyncHandler"/>
+        /// explicitly, so re-declaring the interface on the generated class
+        /// leaves both members unimplemented (CS0535). They forward to the
+        /// protected helpers <c>Page</c> exposes for exactly this.
+        /// </summary>
+        private static void EmitAsyncProcessRequest(IndentedTextWriter w)
+        {
+            w.Line(DebuggerNonUserCode);
+            w.Line("public global::System.IAsyncResult BeginProcessRequest(global::System.Web.HttpContext context, global::System.AsyncCallback cb, object data)");
+            w.Indent++;
+            w.Line("=> AsyncPageBeginProcessRequest(context, cb, data);");
+            w.Indent--;
+            w.Blank();
+            w.Line(DebuggerNonUserCode);
+            w.Line("public void EndProcessRequest(global::System.IAsyncResult ar)");
+            w.Indent++;
+            w.Line("=> AsyncPageEndProcessRequest(ar);");
+            w.Indent--;
         }
 
         private static string Literal(string value) => CodeLiteral.Escape(value);

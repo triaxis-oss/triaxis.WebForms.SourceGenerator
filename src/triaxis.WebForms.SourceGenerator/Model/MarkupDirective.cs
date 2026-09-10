@@ -27,6 +27,10 @@ namespace triaxis.WebForms.SourceGenerator.Model
         public bool RequiresSessionState { get; set; } = true;
         public bool Async { get; set; }
 
+        /// <summary>`AsyncTimeout` in seconds — `Page.AsyncTimeout` is a
+        /// TimeSpan, the directive is a number.</summary>
+        public double? AsyncTimeoutSeconds { get; set; }
+
         /// <summary>Interfaces from `&lt;%@ Implements %&gt;`, added to the
         /// generated type's base list.</summary>
         public IReadOnlyList<string> Implements { get; set; } = Array.Empty<string>();
