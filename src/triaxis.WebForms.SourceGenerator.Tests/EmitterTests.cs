@@ -66,6 +66,45 @@ public class EmitterTests
     }
 
     [Fact]
+    public void Implements_directive_adds_the_interface_to_the_base_list()
+    {
+        // <%@ Implements %> may precede the page directive, so it attaches
+        // only once the whole file is parsed.
+        MarkupDirective directive = MarkupParserDriver.Parse(
+            "Default.aspx",
+            new StringReader(
+                "<%@ Implements Interface=\"System.Web.UI.IPostBackEventHandler\" %>\r\n" +
+                "<%@ Page Inherits=\"Sample.Forms_frmHome\" %>\r\n")).Directive!;
+
+        string frame = PageFrameEmitter.Emit(directive, "/Default.aspx");
+
+        Assert.Contains("global::System.Web.UI.IPostBackEventHandler", frame);
+    }
+
+    [Fact]
+    public void MasterType_and_PreviousPageType_narrow_the_inherited_properties()
+    {
+        ParsedMarkup parsed = MarkupParserDriver.Parse(
+            "Default.aspx",
+            new StringReader(
+                "<%@ Page Inherits=\"Sample.Forms_frmHome\" %>\r\n" +
+                "<%@ MasterType VirtualPath=\"~/Site.master\" %>\r\n" +
+                "<%@ PreviousPageType TypeName=\"Sample.Forms_frmPrev\" %>\r\n"));
+
+        Assert.Equal("~/Site.master", parsed.MasterType!.VirtualPath);
+        Assert.Equal("Sample.Forms_frmPrev", parsed.PreviousPageType!.TypeName);
+
+        // The generator resolves both before emit; the frame only formats them.
+        MarkupDirective directive = parsed.Directive!;
+        directive.MasterType = "global::ASP.site_master";
+        directive.PreviousPageType = "global::Sample.Forms_frmPrev";
+        string frame = PageFrameEmitter.Emit(directive, "/Default.aspx");
+
+        Assert.Contains("public new global::ASP.site_master Master => (global::ASP.site_master)base.Master;", frame);
+        Assert.Contains("public new global::Sample.Forms_frmPrev PreviousPage => (global::Sample.Forms_frmPrev)base.PreviousPage;", frame);
+    }
+
+    [Fact]
     public void Fold_classifies_server_controls_and_literals()
     {
         ServerControlNode root = MarkupTreeFolder.Fold("Default.aspx", SamplePage, serverPrefixes: null, out IReadOnlyList<string> errors);

@@ -67,6 +67,8 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     w.Line("protected global::ASP._global_asax ApplicationInstance => (global::ASP._global_asax)(object)this.Context.ApplicationInstance;");
                     w.Blank();
 
+                    EmitStronglyTypedAccessors(w, directive);
+
                     EmitConstructor(w, typeName, appRelative, isPage, directive.Kind == MarkupKind.Master ? contentPlaceHolderIds : null, forwarding);
 
                     if (!string.IsNullOrEmpty(extraMethods))
@@ -110,6 +112,11 @@ namespace triaxis.WebForms.SourceGenerator.Emit
                     : ", global::System.Web.IHttpHandler";
             }
 
+            foreach (string iface in directive.Implements)
+            {
+                declaration += ", global::" + iface;
+            }
+
             return declaration;
         }
 
@@ -132,6 +139,30 @@ namespace triaxis.WebForms.SourceGenerator.Emit
         // lifecycle methods (but not the render delegates) with this attribute;
         // the writer supplies the indentation.
         public const string DebuggerNonUserCode = "[global::System.Diagnostics.DebuggerNonUserCode]";
+
+        /// <summary>
+        /// <c>&lt;%@ MasterType %&gt;</c> / <c>&lt;%@ PreviousPageType %&gt;</c>
+        /// narrow the inherited <c>Master</c> / <c>PreviousPage</c> for markup
+        /// code (<c>&lt;%= Master.Foo %&gt;</c>), which compiles into this class.
+        /// Codebehind sits *below* the generated type and so still doesn't see
+        /// them — same as under <c>aspnet_compiler</c>.
+        /// </summary>
+        private static void EmitStronglyTypedAccessors(IndentedTextWriter w, MarkupDirective directive)
+        {
+            // A MasterPage has a Master of its own (a nested master); only a
+            // Page has PreviousPage.
+            if (!string.IsNullOrEmpty(directive.MasterType) && directive.Kind != MarkupKind.Control)
+            {
+                w.Line($"public new {directive.MasterType} Master => ({directive.MasterType})base.Master;");
+                w.Blank();
+            }
+
+            if (!string.IsNullOrEmpty(directive.PreviousPageType) && directive.Kind == MarkupKind.Page)
+            {
+                w.Line($"public new {directive.PreviousPageType} PreviousPage => ({directive.PreviousPageType})base.PreviousPage;");
+                w.Blank();
+            }
+        }
 
         private static void EmitConstructor(IndentedTextWriter w, string typeName, string appRelative, bool isPage, IEnumerable<string>? contentPlaceHolderIds, ConstructorForwarding? forwarding)
         {

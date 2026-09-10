@@ -18,11 +18,22 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
         public string? Namespace { get; set; }
     }
 
+    /// <summary>A <c>&lt;%@ MasterType %&gt;</c> / <c>&lt;%@ PreviousPageType %&gt;</c>
+    /// reference: either a CLR type name or a virtual path whose generated
+    /// <c>ASP.*</c> type the caller resolves.</summary>
+    internal sealed class TypeReference
+    {
+        public string? TypeName { get; set; }
+        public string? VirtualPath { get; set; }
+    }
+
     internal sealed class ParsedMarkup
     {
         public MarkupDirective? Directive { get; set; }
         public IReadOnlyList<string> Imports { get; set; } = Array.Empty<string>();
         public IReadOnlyList<TagRegistration> Registrations { get; set; } = Array.Empty<TagRegistration>();
+        public TypeReference? MasterType { get; set; }
+        public TypeReference? PreviousPageType { get; set; }
         public IReadOnlyList<string> Errors { get; set; } = Array.Empty<string>();
     }
 
@@ -39,6 +50,9 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
             var errors = new List<string>();
             var imports = new List<string>();
             var registrations = new List<TagRegistration>();
+            var implements = new List<string>();
+            TypeReference? masterType = null;
+            TypeReference? previousPageType = null;
             MarkupDirective? directive = null;
 
             var parser = new AspParser(filename, input);
@@ -70,6 +84,25 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                     return;
                 }
 
+                if (string.Equals(id, "Implements", StringComparison.OrdinalIgnoreCase)
+                    && attributes?["interface"] is string iface && !string.IsNullOrWhiteSpace(iface))
+                {
+                    implements.Add(iface);
+                    return;
+                }
+
+                if (string.Equals(id, "MasterType", StringComparison.OrdinalIgnoreCase))
+                {
+                    masterType = BuildTypeReference(attributes);
+                    return;
+                }
+
+                if (string.Equals(id, "PreviousPageType", StringComparison.OrdinalIgnoreCase))
+                {
+                    previousPageType = BuildTypeReference(attributes);
+                    return;
+                }
+
                 if (directive == null && attributes != null && TryDirectiveKind(id, out MarkupKind kind))
                 {
                     directive = BuildDirective(kind, attributes);
@@ -77,7 +110,23 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
             };
 
             parser.Parse();
-            return new ParsedMarkup { Directive = directive, Imports = imports, Registrations = registrations, Errors = errors };
+
+            // These directives may precede the page directive, so they attach
+            // once the whole file has been read.
+            if (directive != null)
+            {
+                directive.Implements = implements;
+            }
+
+            return new ParsedMarkup
+            {
+                Directive = directive,
+                Imports = imports,
+                Registrations = registrations,
+                MasterType = masterType,
+                PreviousPageType = previousPageType,
+                Errors = errors,
+            };
         }
 
         private static bool TryDirectiveKind(string id, out MarkupKind kind)
@@ -89,6 +138,16 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                 case "master": kind = MarkupKind.Master; return true;
                 default: kind = default; return false;
             }
+        }
+
+        private static TypeReference? BuildTypeReference(TagAttributes? attributes)
+        {
+            Dictionary<string, string> map = ToMap(attributes);
+            map.TryGetValue("TypeName", out string? typeName);
+            map.TryGetValue("VirtualPath", out string? virtualPath);
+            return string.IsNullOrWhiteSpace(typeName) && string.IsNullOrWhiteSpace(virtualPath)
+                ? null
+                : new TypeReference { TypeName = typeName, VirtualPath = virtualPath };
         }
 
         private static MarkupDirective BuildDirective(MarkupKind kind, TagAttributes attributes)
@@ -115,7 +174,7 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
             return directive;
         }
 
-        private static Dictionary<string, string> ToMap(TagAttributes attributes)
+        private static Dictionary<string, string> ToMap(TagAttributes? attributes)
         {
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (attributes == null)

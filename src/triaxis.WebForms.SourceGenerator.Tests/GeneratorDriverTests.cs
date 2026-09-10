@@ -959,26 +959,46 @@ public class GeneratorDriverTests
     }
 
     [Fact]
-    public void All_four_page_defaults_emit_when_set_in_directive()
+    public void Page_defaults_emit_when_set_in_directive()
     {
-        // EmitPageDefaults' table drives four properties; the existing
-        // happy-path test exercises Theme + EnableEventValidation via
-        // web.config. This one pins the other two
-        // (MaintainScrollPositionOnPostBack + StyleSheetTheme) and the
-        // directive-side override path.
+        // The existing happy-path test exercises Theme + EnableEventValidation
+        // via web.config. This one pins the rest of EmitPageDefaults' table and
+        // the directive-side override path.
         const string stubs =
             "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
-            "  public class Control { public string ID { get; set; } }\n" +
+            "  public class Control { public string ID { get; set; } public bool EnableViewState { get; set; } }\n" +
             "  public class Page : Control { public string Theme { get; set; } public string StyleSheetTheme { get; set; } public bool EnableEventValidation { get; set; } public bool MaintainScrollPositionOnPostBack { get; set; } public void InitializeCulture() { } } }\n" +
             "namespace System.Web.UI.HtmlControls { public class HtmlForm : System.Web.UI.Control, System.Web.UI.IParserAccessor { public void AddParsedSubObject(object o) { } } }\n";
         string text = RunDefaultAspx(stubs,
-            "<%@ Page Inherits=\"Foo.Bar\" MaintainScrollPositionOnPostBack=\"true\" StyleSheetTheme=\"Skin1\" Theme=\"Skin2\" EnableEventValidation=\"true\" %>\r\n" +
+            "<%@ Page Inherits=\"Foo.Bar\" MaintainScrollPositionOnPostBack=\"true\" StyleSheetTheme=\"Skin1\" Theme=\"Skin2\" EnableEventValidation=\"true\" EnableViewState=\"false\" %>\r\n" +
             "<form id=\"f\" runat=\"server\"></form>\r\n");
 
         Assert.Contains("__ctrl.MaintainScrollPositionOnPostBack = true;", text);
         Assert.Contains("__ctrl.StyleSheetTheme = \"Skin1\";", text);
         Assert.Contains("__ctrl.Theme = \"Skin2\";", text);
         Assert.Contains("__ctrl.EnableEventValidation = true;", text);
+        Assert.Contains("__ctrl.EnableViewState = false;", text);
+    }
+
+    [Fact]
+    public void MasterType_virtual_path_resolves_to_the_masters_generated_type()
+    {
+        // VirtualPath → ASP type goes through the same resolver as a user
+        // control's Src, so "~/" and relative forms both land on the generated
+        // name rather than the codebehind class.
+        const string stubs =
+            "namespace System.Web.UI { public interface IParserAccessor { void AddParsedSubObject(object o); }\n" +
+            "  public class Control { public string ID { get; set; } }\n" +
+            "  public class TemplateControl : Control { }\n" +
+            "  public class MasterPage : TemplateControl { }\n" +
+            "  public class Page : Control { public MasterPage Master { get; } public void InitializeCulture() { } } }\n";
+        string text = RunDefaultAspx(stubs,
+            "<%@ Page Inherits=\"Foo.Bar\" %>\r\n" +
+            "<%@ MasterType VirtualPath=\"~/MasterPages/Site.master\" %>\r\n");
+
+        Assert.Contains(
+            "public new global::ASP.masterpages_site_master Master => (global::ASP.masterpages_site_master)base.Master;",
+            text);
     }
 
     [Fact]
