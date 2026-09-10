@@ -106,6 +106,7 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
             if (map.TryGetValue("MasterPageFile", out string? master)) { directive.MasterPageFile = master; }
             if (map.TryGetValue("Language", out string? language) && !string.IsNullOrWhiteSpace(language)) { directive.Language = language; }
             if (map.TryGetValue("AutoEventWireup", out string? autoEvent)) { directive.AutoEventWireup = ParseBool(autoEvent, defaultValue: true); }
+            if (map.TryGetValue("Async", out string? async)) { directive.Async = ParseBool(async, defaultValue: false); }
             if (map.TryGetValue("EnableSessionState", out string? session))
             {
                 directive.RequiresSessionState = !string.Equals(session, "False", StringComparison.OrdinalIgnoreCase);
