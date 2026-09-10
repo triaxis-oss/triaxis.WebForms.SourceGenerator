@@ -103,7 +103,7 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                 string? src = add.Attribute("src")?.Value;
                 if (!string.IsNullOrWhiteSpace(prefix) && !string.IsNullOrWhiteSpace(tagName) && !string.IsNullOrWhiteSpace(src))
                 {
-                    builder[prefix + ":" + tagName] = UserControlMetadata(src!, "/");
+                    builder[prefix + ":" + tagName] = GeneratedTypeForPath(src!, "/");
                 }
             }
             return builder.ToImmutable();
@@ -144,9 +144,10 @@ namespace triaxis.WebForms.SourceGenerator.Parsing
                 .Elements()
                 .Where(e => e.Name.LocalName == "add");
 
-        // src → generated ASP type name. Resolves "~/" against the app root
-        // and relative paths against the supplied page directory.
-        public static string UserControlMetadata(string src, string pageDirectory)
+        // A markup path (user control Src, MasterType VirtualPath) → generated
+        // ASP type name. Resolves "~/" against the app root and relative paths
+        // against the supplied page directory.
+        public static string GeneratedTypeForPath(string src, string pageDirectory)
         {
             string path = src.Replace('\\', '/');
             string virtualPath =

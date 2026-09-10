@@ -389,13 +389,16 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         {
             if (!string.IsNullOrWhiteSpace(registration.TagName) && !string.IsNullOrWhiteSpace(registration.Src))
             {
-                mergedUserControls[registration.Prefix + ":" + registration.TagName] = WebConfigParser.UserControlMetadata(registration.Src!, pageDirectory);
+                mergedUserControls[registration.Prefix + ":" + registration.TagName] = WebConfigParser.GeneratedTypeForPath(registration.Src!, pageDirectory);
             }
             else if (!string.IsNullOrWhiteSpace(registration.Namespace))
             {
                 mergedPrefixes[registration.Prefix] = registration.Namespace!;
             }
         }
+
+        parsed.Directive.MasterType = ResolveTypeReference(parsed.MasterType, pageDirectory);
+        parsed.Directive.PreviousPageType = ResolveTypeReference(parsed.PreviousPageType, pageDirectory);
 
         var resolver = new ControlTypeResolver(mergedPrefixes, metadataName => CanonicalConstructibleType(compilation, metadataName), mergedUserControls);
 
@@ -1634,6 +1637,26 @@ public sealed class MarkupSourceGenerator : IIncrementalGenerator
         }
 
         return true;
+    }
+
+    // A MasterType/PreviousPageType reference as a C# type name: TypeName names
+    // the codebehind class directly, VirtualPath names the markup file whose
+    // generated ASP.* type the property must expose.
+    private static string? ResolveTypeReference(TypeReference? reference, string pageDirectory)
+    {
+        if (reference is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(reference.TypeName))
+        {
+            return "global::" + reference.TypeName!.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(reference.VirtualPath)
+            ? null
+            : "global::" + WebConfigParser.GeneratedTypeForPath(reference.VirtualPath!, pageDirectory);
     }
 
     private static bool NamespaceExists(Compilation compilation, string ns)

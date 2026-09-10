@@ -191,6 +191,7 @@ namespace triaxis.WebForms.SourceGenerator.Emit
             ("EnableEventValidation",            PageDefaultKind.Boolean),
             ("StyleSheetTheme",                  PageDefaultKind.String),
             ("Theme",                            PageDefaultKind.String),
+            ("EnableViewState",                  PageDefaultKind.Boolean),
         };
 
         private enum PageDefaultKind { Boolean, String }
